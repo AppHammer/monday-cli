@@ -1,0 +1,14 @@
+# Core CLI framework
+typer[all]==0.12.3
+
+# HTTP client
+httpx==0.27.0
+
+# Data validation and settings
+pydantic>=2.9.0
+pydantic-settings>=2.5.0
+
+# Utilities
+python-dotenv==1.0.1
+tenacity==8.2.3
+ratelimit==2.2.1

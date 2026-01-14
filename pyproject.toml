@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "monday-cli"
+version = "0.1.0"
+description = "A CLI tool to interact with Monday.com API"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Monday CLI", email = "noreply@example.com"}
+]
+dependencies = [
+    "typer[all]>=0.12.3",
+    "httpx>=0.27.0",
+    "pydantic>=2.6.1",
+    "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.1",
+    "tenacity>=8.2.3",
+    "ratelimit>=2.2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.5",
+    "pytest-mock>=3.12.0",
+    "pytest-httpx>=0.30.0",
+    "black>=24.1.1",
+    "ruff>=0.1.15",
+    "mypy>=1.8.0",
+    "pyinstaller>=6.3.0",
+]
+
+[project.scripts]
+monday = "monday_cli.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=src/monday_cli --cov-report=html --cov-report=term"

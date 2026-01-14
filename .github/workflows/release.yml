@@ -1,0 +1,179 @@
+name: Build and Release Binary
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Trigger on version tags like v1.0.0, v1.2.3
+  workflow_dispatch:  # Allow manual trigger for testing
+
+permissions:
+  contents: write  # Required for creating releases
+
+jobs:
+  build-and-release:
+    name: Build and Release Linux Binary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Build binary
+        run: python build/build_binary.py
+
+      - name: Test binary
+        run: |
+          chmod +x dist/monday
+          dist/monday --help
+          dist/monday version
+          dist/monday items --help
+          dist/monday subitems --help
+          dist/monday updates --help
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Remove 'v' prefix from tag to get version
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Rename binary with platform suffix
+        run: mv dist/monday dist/monday-linux
+
+      - name: Create SHA256 checksum
+        run: |
+          cd dist
+          sha256sum monday-linux > monday-linux.sha256
+          cat monday-linux.sha256
+
+      - name: Extract release notes from CHANGELOG
+        id: changelog
+        run: |
+          # Extract the section for this version from CHANGELOG.md
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Try to find the version section in CHANGELOG.md
+          if grep -q "\[${VERSION}\]" CHANGELOG.md; then
+            # Extract content between this version and the next version heading
+            awk "/\[${VERSION}\]/,/^## \[/" CHANGELOG.md | sed '$d' > release_notes.md
+          else
+            # If version not found, use Unreleased section or create generic notes
+            if grep -q "\[Unreleased\]" CHANGELOG.md; then
+              awk '/\[Unreleased\]/,/^## \[/' CHANGELOG.md | sed '$d' > release_notes.md
+            else
+              # Generic release notes
+              cat << EOF > release_notes.md
+          ## Monday CLI v${VERSION}
+
+          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+          EOF
+            fi
+          fi
+
+      - name: Append installation instructions to release notes
+        run: |
+          cat << 'EOF' >> release_notes.md
+
+          ---
+
+          ## Installation
+
+          ### Linux
+
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/monday-linux
+          chmod +x monday-linux
+          sudo mv monday-linux /usr/local/bin/monday
+          ```
+
+          Or download and install manually:
+
+          ```bash
+          # Download the binary
+          curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/monday-linux -o monday
+
+          # Make it executable
+          chmod +x monday
+
+          # Move to your PATH
+          sudo mv monday /usr/local/bin/
+          ```
+
+          ### Verification
+
+          Verify the download with SHA256 checksum:
+
+          ```bash
+          wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/monday-linux.sha256
+          sha256sum -c monday-linux.sha256
+          ```
+
+          ### Configuration
+
+          Set your Monday.com API token:
+
+          ```bash
+          export MONDAY_API_TOKEN="your_api_token_here"
+          ```
+
+          Or create a `.env` file in your project directory:
+
+          ```
+          MONDAY_API_TOKEN=your_api_token_here
+          ```
+
+          ### Quick Start
+
+          ```bash
+          # Show help
+          monday --help
+
+          # Get an item
+          monday items get <item_id>
+
+          # Create an item
+          monday items create <board_id> --name "Task name"
+
+          # Create a subitem
+          monday subitems create <parent_item_id> --name "Subtask name"
+          ```
+
+          ### Documentation
+
+          - [README](https://github.com/${{ github.repository }}/blob/main/README.md)
+          - [CHANGELOG](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
+          - [Monday.com API Documentation](https://developer.monday.com/api-reference/reference/about-the-api-reference)
+
+          ---
+
+          Generated with [Monday CLI](https://github.com/${{ github.repository }})
+          EOF
+
+      - name: Display release notes
+        run: cat release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Monday CLI v${{ steps.version.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}  # Mark as prerelease if version contains hyphen (e.g., v1.0.0-beta)
+          files: |
+            dist/monday-linux
+            dist/monday-linux.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -60,6 +60,26 @@ query GetItem($itemIds: [ID!]!) {
 }
 """
 
+# Get board columns with settings (for status options)
+GET_BOARD_COLUMNS = """
+query GetBoardColumns($boardIds: [ID!]!) {
+  boards(ids: $boardIds) {
+    id
+    name
+    columns {
+      id
+      title
+      type
+      settings_str
+    }
+  }
+  complexity {
+    before
+    after
+  }
+}
+"""
+
 # Get complexity tracking
 GET_COMPLEXITY = """
 query {

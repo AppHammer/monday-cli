@@ -1,5 +1,6 @@
 """Pydantic models for Monday.com API responses."""
 
+import json
 from typing import Any
 
 from pydantic import BaseModel
@@ -81,6 +82,45 @@ class Complexity(BaseModel):
     after: int | None = None
     query: int | None = None
     reset_in_x_seconds: int | None = None
+
+
+class StatusOption(BaseModel):
+    """Represents a single status option in a status column."""
+
+    id: str
+    label: str
+    index: int
+
+
+class Column(BaseModel):
+    """Represents a board column with its settings."""
+
+    id: str
+    title: str
+    type: str
+    settings_str: str | None = None
+
+    def get_status_options(self) -> list[StatusOption]:
+        """Parse settings_str to extract status options."""
+        if not self.settings_str or self.type != "status":
+            return []
+        try:
+            settings = json.loads(self.settings_str)
+            labels = settings.get("labels", {})
+            return [
+                StatusOption(id=str(idx), label=label, index=int(idx))
+                for idx, label in labels.items()
+            ]
+        except (json.JSONDecodeError, AttributeError, ValueError):
+            return []
+
+
+class BoardWithColumns(BaseModel):
+    """Represents a board with its columns."""
+
+    id: str
+    name: str
+    columns: list[Column]
 
 
 class GraphQLResponse(BaseModel):

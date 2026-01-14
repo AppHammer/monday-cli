@@ -5,6 +5,8 @@ A command-line interface tool to interact with the Monday.com API. Built with Py
 ## Features
 
 - **Item Management**: Get, create, and manage items on Monday.com boards
+- **Status Management**: List available statuses and update item statuses using human-readable labels
+- **Column Discovery**: List all board columns with their IDs and types
 - **Subitem Operations**: Create subitems and update their status
 - **Updates**: Post updates to items and subitems
 - **Production Ready**: Includes retry logic, rate limiting, and comprehensive error handling
@@ -51,6 +53,10 @@ A command-line interface tool to interact with the Monday.com API. Built with Py
 ## Configuration
 
 The CLI requires a Monday.com API token to authenticate. Get your API token from Monday.com:
+1. Go to https://apphammer.monday.com/admin/integrations/api
+2. Copy your API v2 token
+
+Or navigate manually:
 1. Go to Monday.com
 2. Click your avatar → Admin → API
 3. Copy your API v2 token
@@ -117,6 +123,75 @@ monday items create 9876543210 "New Task" --group-id "topics"
 monday items create 9876543210 "New Task" --column-values '{"status":{"index":1},"date":"2026-01-15"}'
 ```
 
+**List all board columns:**
+```bash
+monday items list-columns <ITEM_ID>
+```
+
+This command shows all columns on the item's board with their IDs, types, and available options (for status columns).
+
+Example:
+```bash
+monday items list-columns 1234567890
+```
+
+Output:
+```json
+{
+  "board_id": "987654",
+  "board_name": "My Board",
+  "item_id": "1234567890",
+  "columns": [
+    {
+      "column_id": "status",
+      "title": "Status",
+      "type": "status",
+      "status_options": [
+        {"index": 0, "label": "Done"},
+        {"index": 1, "label": "Working on it"},
+        {"index": 2, "label": "Stuck"}
+      ]
+    },
+    {
+      "column_id": "text",
+      "title": "Description",
+      "type": "text"
+    }
+  ]
+}
+```
+
+**List available statuses:**
+```bash
+monday items list-statuses <ITEM_ID>
+```
+
+This command shows only status columns with their available options.
+
+Example:
+```bash
+monday items list-statuses 1234567890
+```
+
+**Update item status:**
+```bash
+monday items update-status <ITEM_ID> <COLUMN_ID> <STATUS_LABEL>
+```
+
+Update an item's status using human-readable labels (case-insensitive).
+
+Examples:
+```bash
+# Update status to "Done"
+monday items update-status 1234567890 status "Done"
+
+# Update status (case-insensitive)
+monday items update-status 1234567890 status "working on it"
+
+# Update specific status column
+monday items update-status 1234567890 status_1 "In Progress"
+```
+
 #### Subitems
 
 **Create a subitem:**
@@ -133,7 +208,31 @@ monday subitems create 1234567890 "New Subtask"
 monday subitems create 1234567890 "New Subtask" --column-values '{"status":{"index":1}}'
 ```
 
-**Update subitem status:**
+**List all board columns:**
+```bash
+monday subitems list-columns <SUBITEM_ID>
+```
+
+This command shows all columns on the subitem's board with their IDs, types, and available options (for status columns).
+
+Example:
+```bash
+monday subitems list-columns 9999999999
+```
+
+**List available statuses:**
+```bash
+monday subitems list-statuses <SUBITEM_ID>
+```
+
+This command shows only status columns with their available options.
+
+Example:
+```bash
+monday subitems list-statuses 9999999999
+```
+
+**Update subitem status (by index):**
 ```bash
 monday subitems update-status <SUBITEM_ID> <BOARD_ID> <COLUMN_ID> <STATUS_INDEX>
 ```
@@ -144,6 +243,25 @@ monday subitems update-status 9999999999 1234567890 status 1
 ```
 
 Status index corresponds to the position in your status column (e.g., 0=Done, 1=Working, 2=Stuck).
+
+**Update subitem status (by label):**
+```bash
+monday subitems update-status-label <SUBITEM_ID> <COLUMN_ID> <STATUS_LABEL>
+```
+
+Update a subitem's status using human-readable labels (case-insensitive). This automatically finds the board ID and status index.
+
+Examples:
+```bash
+# Update status to "Done"
+monday subitems update-status-label 9999999999 status "Done"
+
+# Update status (case-insensitive)
+monday subitems update-status-label 9999999999 status "working on it"
+
+# Update specific status column
+monday subitems update-status-label 9999999999 status_1 "In Progress"
+```
 
 #### Updates
 
@@ -327,8 +445,11 @@ For issues and questions:
 ### v0.1.0 (2026-01-14)
 - Initial release
 - Item management (get, create)
+- Status management (list statuses, update status by label)
+- Column discovery (list all board columns)
 - Subitem management (create, update status)
 - Update management (create)
 - Retry logic and rate limiting
 - JSON output format
 - Verbose and debug modes
+- GitHub Actions workflow for automated releases

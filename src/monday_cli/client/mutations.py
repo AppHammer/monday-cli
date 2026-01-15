@@ -58,3 +58,23 @@ mutation ChangeColumnValue($boardId: ID!, $itemId: ID!, $columnId: String!, $val
   }
 }
 """
+
+# Create document in a doc column
+CREATE_DOC = """
+mutation CreateDoc($itemId: ID!, $columnId: String!) {
+  create_doc(location: { board: { item_id: $itemId, column_id: $columnId } }) {
+    id
+  }
+}
+"""
+
+# Create document block (add content to doc)
+CREATE_DOC_BLOCK = """
+mutation CreateDocBlock($docId: ID!, $type: DocBlockContentType!, $content: JSON!) {
+  create_doc_block(doc_id: $docId, type: $type, content: $content) {
+    id
+    type
+    content
+  }
+}
+"""

@@ -91,3 +91,17 @@ query {
   }
 }
 """
+
+# Get document blocks and content
+GET_DOC_BLOCKS = """
+query GetDocBlocks($docIds: [ID!]!) {
+  docs(ids: $docIds) {
+    id
+    blocks {
+      id
+      type
+      content
+    }
+  }
+}
+"""

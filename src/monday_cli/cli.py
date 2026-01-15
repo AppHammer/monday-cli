@@ -19,10 +19,12 @@ app = typer.Typer(
 items_app = typer.Typer(help="Manage Monday.com items")
 subitems_app = typer.Typer(help="Manage Monday.com subitems")
 updates_app = typer.Typer(help="Manage Monday.com updates")
+docs_app = typer.Typer(help="Manage Monday.com documents")
 
 app.add_typer(items_app, name="items")
 app.add_typer(subitems_app, name="subitems")
 app.add_typer(updates_app, name="updates")
+app.add_typer(docs_app, name="docs")
 
 # Global state
 _client: MondayGraphQLClient | None = None
@@ -106,4 +108,4 @@ if __name__ == "__main__":
 
 
 # Import command modules to register commands (after all functions are defined)
-from monday_cli.commands import items, subitems, updates  # noqa: F401, E402
+from monday_cli.commands import docs, items, subitems, updates  # noqa: F401, E402

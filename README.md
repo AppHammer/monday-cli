@@ -9,6 +9,7 @@ A command-line interface tool to interact with the Monday.com API. Built with Py
 - **Column Discovery**: List all board columns with their IDs and types
 - **Subitem Operations**: Create subitems and update their status
 - **Updates**: Post updates to items and subitems
+- **Document Management**: Create and read documents in Monday.com doc columns
 - **Production Ready**: Includes retry logic, rate limiting, and comprehensive error handling
 - **JSON Output**: Machine-readable JSON output for easy integration
 - **Verbose Logging**: Debug mode for troubleshooting
@@ -279,6 +280,51 @@ monday updates create 1234567890 "Work in progress"
 monday updates create 9999999999 "Completed subtask"
 ```
 
+#### Docs
+
+**Create a document in a doc column:**
+```bash
+monday docs create <ITEM_ID> <COLUMN_NAME> [OPTIONS]
+
+Options:
+  -c, --content TEXT   Initial text content for the document (optional)
+```
+
+Examples:
+```bash
+# Create empty document
+monday docs create 1234567890 "Monday Doc"
+
+# Create document with initial content
+monday docs create 1234567890 "Notes" --content "Meeting notes here"
+```
+
+**Get document content:**
+```bash
+monday docs get <ITEM_ID> <COLUMN_NAME>
+```
+
+Retrieves all blocks from a document, including their type and content.
+
+Example:
+```bash
+monday docs get 1234567890 "Monday Doc"
+```
+
+Output:
+```json
+{
+  "id": "123456",
+  "blocks": [
+    {
+      "id": "block-1",
+      "type": "normal_text",
+      "content": "{\"alignment\":\"left\",\"direction\":\"ltr\",\"deltaFormat\":[{\"insert\":\"Document content here\"}]}"
+    }
+  ]
+}
+```
+
 ### Other Commands
 
 **Show version:**
@@ -441,6 +487,11 @@ For issues and questions:
 - Monday.com API Support: https://support.monday.com
 
 ## Changelog
+
+### v0.2.0 (2026-01-15)
+- Document management (create, get)
+- Create documents in Monday.com doc columns
+- Read document content by item ID and column name
 
 ### v0.1.0 (2026-01-14)
 - Initial release

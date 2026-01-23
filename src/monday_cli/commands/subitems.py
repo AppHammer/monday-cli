@@ -29,22 +29,24 @@ def list_subitems(
     cursor: Optional[str] = typer.Option(None, "--cursor", "-c", help="Pagination cursor for next page (only used with --board-id)"),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
 ) -> None:
-    """List subitems from a parent item or subitems board.
+    """List subitems from a parent item or board.
 
     You can list subitems in two ways:
-    1. By parent item ID: Lists all subitems belonging to a specific parent item
-    2. By board ID: Lists all subitems from a subitems board (with pagination)
+    1. By parent item ID (--item-id): Lists all subitems belonging to a specific parent item
+    2. By board ID (--board-id): Lists all subitems from a board
+       - For main boards: Aggregates all subitems from all items on the board
+       - For subitems boards: Lists all subitems directly (with pagination support)
+
+    Note: Use 'monday items list' for main items/tasks on regular boards.
 
     Example:
         monday subitems list --item-id 1234567890
 
         monday subitems list --board-id 1234567890
 
-        monday subitems list --board-id 1234567890 --limit 50
+        monday subitems list --board-id 1234567890 --table
 
         monday subitems list --board-id 1234567890 --all
-
-        monday subitems list --item-id 1234567890 --table
     """
     try:
         if item_id is None and board_id is None:
@@ -152,11 +154,47 @@ def list_subitems(
 
             board = boards[0]
             board_name = board.get("name", "Unknown")
-            items_page = board.get("items_page", {})
-            all_subitems = items_page.get("items", [])
-            next_cursor = items_page.get("cursor")
+
+            # Check if this is a main board (not a subitems board)
+            # If it is, we need to fetch all items and their subitems
+            if "subitems of" not in board_name.lower():
+                # This is a main board - fetch all items with their subitems
+                items_page = board.get("items_page", {})
+                main_items = items_page.get("items", [])
+
+                # Fetch subitems for each item
+                all_subitems = []
+                for item in main_items:
+                    item_id = item.get("id")
+                    if item_id:
+                        # Fetch subitems for this item
+                        subitems_result = client.execute_query(
+                            GET_ITEM_SUBITEMS,
+                            {"itemIds": [item_id]}
+                        )
+                        items_with_subitems = subitems_result.get("items", [])
+                        if items_with_subitems:
+                            subitems = items_with_subitems[0].get("subitems", [])
+                            all_subitems.extend(subitems)
+
+                # For main boards, we don't support pagination with cursor
+                # because we're aggregating subitems from multiple items
+                next_cursor = None
+
+                if not all_subitems:
+                    typer.secho(
+                        f"No subitems found on board '{board_name}' (ID: {board_id})",
+                        fg=typer.colors.YELLOW,
+                    )
+                    raise typer.Exit(0)
+            else:
+                # This is a subitems board - use the items directly
+                items_page = board.get("items_page", {})
+                all_subitems = items_page.get("items", [])
+                next_cursor = items_page.get("cursor")
 
             # If --all flag is set, fetch all pages
+            # (only supported for subitems boards, not main boards)
             pages_fetched = 1
             if all_pages and next_cursor:
                 typer.secho(

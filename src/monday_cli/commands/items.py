@@ -492,12 +492,20 @@ def list_items(
     limit: int = typer.Option(100, "--limit", "-l", help="Items per page (max 500)"),
     all_pages: bool = typer.Option(False, "--all", "-a", help="Fetch all items across all pages"),
     cursor: Optional[str] = typer.Option(None, "--cursor", "-c", help="Pagination cursor for next page"),
+    group: Optional[str] = typer.Option(None, "--group", "-g", help="Filter by group title (case-insensitive)"),
+    group_id: Optional[str] = typer.Option(None, "--group-id", help="Filter by group ID (exact match)"),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
 ) -> None:
-    """List all items from a board ID.
+    """List all items/tasks from a board.
+
+    Lists main items (tasks) from regular boards only. This command will NOT list
+    subitems - use 'monday subitems list' for that.
 
     Returns items with pagination support. By default, returns the first 100 items.
     Use --cursor to get the next page, or --all to fetch all items automatically.
+
+    Filter by group using --group (matches group title, case-insensitive) or
+    --group-id (matches exact group ID). Use 'monday groups list' to see available groups.
 
     Column values are included by default for complete data export.
 
@@ -509,6 +517,12 @@ def list_items(
         monday items list --board-id 1234567890 --limit 50
 
         monday items list --board-id 1234567890 --all
+
+        monday items list --board-id 1234567890 --group "Topics"
+
+        monday items list --board-id 1234567890 --group-id "topics"
+
+        monday items list --board-id 1234567890 --group "Topics" --all
 
         monday items list --board-id 1234567890 --cursor "MSw5NzI4MDA5MDAsaV9YcmxJb0p1VEdYc1VWeGlxeF9kLDg4MiwzNXw0MTQ1NzU1MTE5"
 
@@ -531,6 +545,14 @@ def list_items(
         if limit < 1 or limit > 500:
             typer.secho(
                 "Error: Limit must be between 1 and 500",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+
+        # Validate that both group filters aren't used together
+        if group and group_id:
+            typer.secho(
+                "Error: Cannot use both --group and --group-id together. Choose one.",
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
@@ -558,6 +580,23 @@ def list_items(
 
         board = boards[0]
         board_name = board.get("name", "Unknown")
+
+        # Check if this is a subitems board - REFUSE to list subitems
+        if "subitems of" in board_name.lower():
+            typer.secho(
+                f"Error: Board '{board_name}' is a subitems board.",
+                fg=typer.colors.RED,
+            )
+            typer.secho(
+                f"Use 'monday subitems list --board-id {final_board_id}' to list subitems.",
+                fg=typer.colors.BLUE,
+            )
+            typer.secho(
+                "The 'items list' command is for listing main items/tasks from regular boards only.",
+                fg=typer.colors.YELLOW,
+            )
+            raise typer.Exit(1)
+
         items_page = board.get("items_page", {})
         all_items = items_page.get("items", [])
         next_cursor = items_page.get("cursor")
@@ -599,6 +638,43 @@ def list_items(
                         fg=typer.colors.YELLOW,
                     )
                     break
+
+        # Apply group filtering if specified (client-side filtering)
+        if group or group_id:
+            original_count = len(all_items)
+
+            if group_id:
+                # Exact match on group ID
+                all_items = [
+                    item for item in all_items
+                    if item.get("group") and item["group"].get("id") == group_id
+                ]
+            else:  # group filter (title)
+                # Case-insensitive match on group title
+                group_lower = group.lower()
+                all_items = [
+                    item for item in all_items
+                    if item.get("group") and item["group"].get("title", "").lower() == group_lower
+                ]
+
+            filtered_count = len(all_items)
+            if filtered_count == 0:
+                typer.secho(
+                    f"No items found in group '{group or group_id}' on board {final_board_id}",
+                    fg=typer.colors.YELLOW,
+                )
+                typer.secho(
+                    f"Tip: Use 'monday groups list {final_board_id}' to see available groups",
+                    fg=typer.colors.BLUE,
+                )
+                raise typer.Exit(0)
+
+            # Show filter info when fetching multiple pages
+            if all_pages and original_count != filtered_count:
+                typer.secho(
+                    f"Filtered {original_count} items to {filtered_count} in group '{group or group_id}'",
+                    fg=typer.colors.GREEN,
+                )
 
         # Format output
         if table:
@@ -664,8 +740,16 @@ def list_items(
                     "items_count": len(all_items),
                 }
 
+            # Add filter metadata if used
+            if group:
+                output["group_filter"] = group
+            if group_id:
+                output["group_id_filter"] = group_id
+
             print_json(output)
 
+    except typer.Exit:
+        raise
     except AuthenticationError:
         typer.secho(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",

@@ -85,22 +85,20 @@ def list_boards(
         if state and state.lower() != "all":
             variables["state"] = state.lower()
 
+        # Add workspace_ids if workspace_id is specified (API-level filtering)
+        if workspace_id:
+            variables["workspace_ids"] = [str(workspace_id)]
+
         result = client.execute_query(GET_BOARDS, variables)
 
         boards = result.get("boards", [])
 
-        # Filter by workspace name if specified
+        # Filter by workspace name if specified (client-side filtering)
+        # Note: API doesn't support filtering by workspace name, only by ID
         if workspace_name:
             boards = [
                 board for board in boards
                 if board.get("workspace") and board["workspace"].get("name", "").lower() == workspace_name.lower()
-            ]
-
-        # Filter by workspace ID if specified
-        if workspace_id:
-            boards = [
-                board for board in boards
-                if board.get("workspace") and str(board["workspace"].get("id", "")) == str(workspace_id)
             ]
 
         if not boards:

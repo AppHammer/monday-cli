@@ -80,6 +80,26 @@ query GetBoardColumns($boardIds: [ID!]!) {
 }
 """
 
+# Get board groups
+GET_BOARD_GROUPS = """
+query GetBoardGroups($boardIds: [ID!]!) {
+  boards(ids: $boardIds) {
+    id
+    name
+    groups {
+      id
+      title
+      color
+      position
+    }
+  }
+  complexity {
+    before
+    after
+  }
+}
+"""
+
 # Get complexity tracking
 GET_COMPLEXITY = """
 query {
@@ -108,8 +128,8 @@ query GetDocBlocks($docIds: [ID!]!) {
 
 # Get boards with filtering and pagination
 GET_BOARDS = """
-query GetBoards($limit: Int, $page: Int, $state: State) {
-  boards(limit: $limit, page: $page, state: $state) {
+query GetBoards($limit: Int, $page: Int, $state: State, $workspace_ids: [ID!]) {
+  boards(limit: $limit, page: $page, state: $state, workspace_ids: $workspace_ids) {
     id
     name
     description

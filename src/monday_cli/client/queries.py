@@ -105,3 +105,154 @@ query GetDocBlocks($docIds: [ID!]!) {
   }
 }
 """
+
+# Get boards with filtering and pagination
+GET_BOARDS = """
+query GetBoards($limit: Int, $page: Int, $state: State) {
+  boards(limit: $limit, page: $page, state: $state) {
+    id
+    name
+    description
+    state
+    board_kind
+    items_count
+    updated_at
+    workspace {
+      id
+      name
+    }
+  }
+  complexity {
+    before
+    after
+  }
+}
+"""
+
+# Get items from a board with cursor-based pagination
+GET_BOARD_ITEMS = """
+query GetBoardItems($boardIds: [ID!]!, $limit: Int, $cursor: String) {
+  boards(ids: $boardIds) {
+    id
+    name
+    items_page(limit: $limit, cursor: $cursor) {
+      cursor
+      items {
+        id
+        name
+        state
+        created_at
+        updated_at
+        creator {
+          id
+          name
+        }
+        group {
+          id
+          title
+        }
+        column_values {
+          id
+          text
+          type
+        }
+      }
+    }
+  }
+  complexity {
+    before
+    after
+  }
+}
+"""
+
+# Get subitems from a parent item
+GET_ITEM_SUBITEMS = """
+query GetItemSubitems($itemIds: [ID!]!) {
+  items(ids: $itemIds) {
+    id
+    name
+    board {
+      id
+      name
+    }
+    subitems {
+      id
+      name
+      state
+      created_at
+      updated_at
+      creator {
+        id
+        name
+      }
+      board {
+        id
+        name
+      }
+      column_values {
+        id
+        text
+        type
+      }
+    }
+  }
+  complexity {
+    before
+    after
+  }
+}
+"""
+
+# Get next page of items using cursor (more efficient than nested boards query)
+GET_NEXT_ITEMS_PAGE = """
+query GetNextItemsPage($cursor: String!, $limit: Int) {
+  next_items_page(cursor: $cursor, limit: $limit) {
+    cursor
+    items {
+      id
+      name
+      state
+      created_at
+      updated_at
+      creator {
+        id
+        name
+      }
+      group {
+        id
+        title
+      }
+      column_values {
+        id
+        text
+        type
+      }
+    }
+  }
+  complexity {
+    before
+    after
+  }
+}
+"""
+
+# Get workspaces
+GET_WORKSPACES = """
+query GetWorkspaces($limit: Int, $ids: [ID!], $membership_kind: WorkspaceMembershipKind) {
+  workspaces(limit: $limit, ids: $ids, membership_kind: $membership_kind) {
+    id
+    name
+    kind
+    description
+    account_product {
+      id
+      kind
+    }
+  }
+  complexity {
+    before
+    after
+  }
+}
+"""

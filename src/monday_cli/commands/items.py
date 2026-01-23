@@ -4,10 +4,17 @@ import json
 from typing import Optional
 
 import typer
+from rich.console import Console
+from rich.table import Table
 
 from monday_cli.cli import get_client, items_app
 from monday_cli.client.mutations import CHANGE_COLUMN_VALUE, CREATE_ITEM
-from monday_cli.client.queries import GET_BOARD_COLUMNS, GET_ITEM_BY_ID
+from monday_cli.client.queries import (
+    GET_BOARD_COLUMNS,
+    GET_BOARD_ITEMS,
+    GET_ITEM_BY_ID,
+    GET_NEXT_ITEMS_PAGE,
+)
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
 from monday_cli.utils.output import print_json
 
@@ -460,6 +467,204 @@ def list_columns(
         }
 
         print_json(output)
+
+    except AuthenticationError:
+        typer.secho(
+            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    except RateLimitError as e:
+        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    except MondayAPIError as e:
+        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+
+@items_app.command("list")
+def list_items(
+    board_id: Optional[int] = typer.Argument(None, help="ID of the board to list items from"),
+    board_id_opt: Optional[int] = typer.Option(None, "--board-id", "-b", help="ID of the board to list items from"),
+    limit: int = typer.Option(100, "--limit", "-l", help="Items per page (max 500)"),
+    all_pages: bool = typer.Option(False, "--all", "-a", help="Fetch all items across all pages"),
+    cursor: Optional[str] = typer.Option(None, "--cursor", "-c", help="Pagination cursor for next page"),
+    table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
+) -> None:
+    """List all items from a board ID.
+
+    Returns items with pagination support. By default, returns the first 100 items.
+    Use --cursor to get the next page, or --all to fetch all items automatically.
+
+    Column values are included by default for complete data export.
+
+    Example:
+        monday items list 1234567890
+
+        monday items list --board-id 1234567890
+
+        monday items list --board-id 1234567890 --limit 50
+
+        monday items list --board-id 1234567890 --all
+
+        monday items list --board-id 1234567890 --cursor "MSw5NzI4MDA5MDAsaV9YcmxJb0p1VEdYc1VWeGlxeF9kLDg4MiwzNXw0MTQ1NzU1MTE5"
+
+        monday items list --board-id 1234567890 --table
+    """
+    try:
+        # Determine which board_id to use
+        final_board_id = board_id_opt if board_id_opt is not None else board_id
+
+        if final_board_id is None:
+            typer.secho(
+                "Error: Board ID is required. Provide it as an argument or use --board-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday items list 1234567890", fg=typer.colors.BLUE)
+            typer.secho("Example: monday items list --board-id 1234567890", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
+        # Validate limit
+        if limit < 1 or limit > 500:
+            typer.secho(
+                "Error: Limit must be between 1 and 500",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+
+        client = get_client()
+
+        # Fetch first page
+        variables = {
+            "boardIds": [str(final_board_id)],
+            "limit": limit,
+        }
+
+        if cursor:
+            variables["cursor"] = cursor
+
+        result = client.execute_query(GET_BOARD_ITEMS, variables)
+
+        boards = result.get("boards", [])
+        if not boards:
+            typer.secho(
+                f"Board {final_board_id} not found or you don't have access",
+                fg=typer.colors.YELLOW,
+            )
+            raise typer.Exit(1)
+
+        board = boards[0]
+        board_name = board.get("name", "Unknown")
+        items_page = board.get("items_page", {})
+        all_items = items_page.get("items", [])
+        next_cursor = items_page.get("cursor")
+
+        # If --all flag is set, fetch all pages
+        pages_fetched = 1
+        if all_pages and next_cursor:
+            typer.secho(
+                f"Fetching page {pages_fetched}... ({len(all_items)} items)",
+                fg=typer.colors.BLUE,
+            )
+
+            while next_cursor:
+                pages_fetched += 1
+                typer.secho(
+                    f"Fetching page {pages_fetched}...",
+                    fg=typer.colors.BLUE,
+                )
+
+                result = client.execute_query(
+                    GET_NEXT_ITEMS_PAGE,
+                    {"cursor": next_cursor, "limit": limit},
+                )
+
+                next_page = result.get("next_items_page", {})
+                page_items = next_page.get("items", [])
+                all_items.extend(page_items)
+                next_cursor = next_page.get("cursor")
+
+                typer.secho(
+                    f"  Total items so far: {len(all_items)}",
+                    fg=typer.colors.BLUE,
+                )
+
+                # Safety check to prevent infinite loops
+                if pages_fetched > 1000:
+                    typer.secho(
+                        "Warning: Reached maximum page limit (1000). Stopping pagination.",
+                        fg=typer.colors.YELLOW,
+                    )
+                    break
+
+        # Format output
+        if table:
+            console = Console()
+            title = f"{board_name} - Items"
+            if all_pages:
+                title += f" ({len(all_items)} total, {pages_fetched} pages)"
+            else:
+                title += f" ({len(all_items)} items" + (", more available)" if next_cursor else ")")
+
+            rich_table = Table(title=title)
+
+            rich_table.add_column("ID", style="cyan", no_wrap=True)
+            rich_table.add_column("Name", style="green")
+            rich_table.add_column("State", style="yellow")
+            rich_table.add_column("Group", style="blue")
+            rich_table.add_column("Creator", style="magenta")
+            rich_table.add_column("Created", style="dim")
+
+            for item in all_items:
+                group_title = item.get("group", {}).get("title", "N/A") if item.get("group") else "N/A"
+                creator_name = item.get("creator", {}).get("name", "N/A") if item.get("creator") else "N/A"
+                created_at = item.get("created_at", "N/A")
+                if created_at != "N/A" and "T" in created_at:
+                    # Format to just date
+                    created_at = created_at.split("T")[0]
+
+                rich_table.add_row(
+                    str(item.get("id", "")),
+                    item.get("name", ""),
+                    item.get("state", ""),
+                    group_title,
+                    creator_name,
+                    created_at,
+                )
+
+            console.print(rich_table)
+
+            # Show summary info
+            if all_pages:
+                typer.secho(f"\nTotal items: {len(all_items)} (fetched {pages_fetched} pages)", fg=typer.colors.BLUE)
+            else:
+                if next_cursor:
+                    typer.secho(f"\nShowing {len(all_items)} items. Use --cursor to get next page or --all to fetch all items.", fg=typer.colors.BLUE)
+                else:
+                    typer.secho(f"\nTotal items: {len(all_items)}", fg=typer.colors.BLUE)
+        else:
+            if all_pages:
+                output = {
+                    "board_id": str(final_board_id),
+                    "board_name": board_name,
+                    "items": all_items,
+                    "total_items": len(all_items),
+                    "pages_fetched": pages_fetched,
+                }
+            else:
+                output = {
+                    "board_id": str(final_board_id),
+                    "board_name": board_name,
+                    "items": all_items,
+                    "cursor": next_cursor,
+                    "has_more": next_cursor is not None,
+                    "items_count": len(all_items),
+                }
+
+            print_json(output)
 
     except AuthenticationError:
         typer.secho(

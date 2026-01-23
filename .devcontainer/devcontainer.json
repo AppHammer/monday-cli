@@ -2,8 +2,16 @@
 // README at: https://github.com/devcontainers/templates/tree/main/src/python
 {
 	"name": "Python 3",
+    "runArgs": ["--env-file", "${localWorkspaceFolder}/.env"],
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/python:2-3.13-trixie"
+	"image": "mcr.microsoft.com/devcontainers/python:2-3.13-trixie",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"Anthropic.claude-code"
+			]
+		}
+	}
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},

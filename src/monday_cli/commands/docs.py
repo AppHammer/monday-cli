@@ -14,8 +14,8 @@ from monday_cli.utils.output import print_json
 
 @docs_app.command("create")
 def create_doc(
-    item_id: int = typer.Argument(..., help="ID of the item containing the doc column"),
-    column_name: str = typer.Argument(..., help="Name of the doc column (e.g., 'Monday Doc')"),
+    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item containing the doc column"),
+    column_name: Optional[str] = typer.Option(None, "--column-name", "-n", help="Name of the doc column (e.g., 'Monday Doc')"),
     content: Optional[str] = typer.Option(
         None,
         "--content",
@@ -29,11 +29,27 @@ def create_doc(
     Optionally adds initial text content to the document.
 
     Example:
-        monday docs create 1234567890 "Monday Doc"
+        monday docs create --item-id 1234567890 --column-name "Monday Doc"
 
-        monday docs create 1234567890 "Notes" --content "Meeting notes here"
+        monday docs create --item-id 1234567890 --column-name "Notes" --content "Meeting notes here"
     """
     try:
+        if item_id is None:
+            typer.secho(
+                "Error: Item ID is required. Use --item-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday docs create --item-id 1234567890 --column-name \"Monday Doc\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
+        if column_name is None:
+            typer.secho(
+                "Error: Column name is required. Use --column-name",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday docs create --item-id 1234567890 --column-name \"Monday Doc\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
         client = get_client()
 
         # Get the item to find its board ID
@@ -143,17 +159,33 @@ def create_doc(
 
 @docs_app.command("get")
 def get_doc(
-    item_id: int = typer.Argument(..., help="ID of the item containing the doc column"),
-    column_name: str = typer.Argument(..., help="Name of the doc column (e.g., 'Monday Doc')"),
+    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item containing the doc column"),
+    column_name: Optional[str] = typer.Option(None, "--column-name", "-n", help="Name of the doc column (e.g., 'Monday Doc')"),
 ) -> None:
     """Get document content by item ID and column name.
 
     Looks up the doc column by name and retrieves the document content.
 
     Example:
-        monday docs get 1234567890 "Monday Doc"
+        monday docs get --item-id 1234567890 --column-name "Monday Doc"
     """
     try:
+        if item_id is None:
+            typer.secho(
+                "Error: Item ID is required. Use --item-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday docs get --item-id 1234567890 --column-name \"Monday Doc\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
+        if column_name is None:
+            typer.secho(
+                "Error: Column name is required. Use --column-name",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday docs get --item-id 1234567890 --column-name \"Monday Doc\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
         client = get_client()
 
         # Get the item to find its board ID and column values

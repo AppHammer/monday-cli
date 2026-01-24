@@ -14,8 +14,6 @@ from monday_cli.utils.output import print_json
 
 @boards_app.command("list")
 def list_boards(
-    limit: int = typer.Option(25, "--limit", "-l", help="Number of boards to return (max 100)"),
-    page: int = typer.Option(1, "--page", "-p", help="Page number (starts at 1)"),
     state: Optional[str] = typer.Option(
         "active",
         "--state",
@@ -32,14 +30,12 @@ def list_boards(
     Use --state to filter by board state.
     Use --workspace-name or --workspace-id to filter by workspace.
 
+    Fetches all boards without pagination.
+
     Example:
         monday boards list
 
-        monday boards list --limit 50
-
         monday boards list --state all
-
-        monday boards list --state archived --page 2
 
         monday boards list --workspace-name "GENISIS-Demoboard"
 
@@ -57,41 +53,43 @@ def list_boards(
             )
             raise typer.Exit(1)
 
-        # Validate limit
-        if limit < 1 or limit > 100:
-            typer.secho(
-                "Error: Limit must be between 1 and 100",
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(1)
-
-        # Validate page
-        if page < 1:
-            typer.secho(
-                "Error: Page must be 1 or greater",
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(1)
-
         client = get_client()
 
-        # Build variables
-        variables = {
-            "limit": limit,
-            "page": page,
-        }
+        # Fetch all boards by paginating through results
+        all_boards = []
+        page = 1
+        limit = 100  # Use max limit per page
 
-        # Add state if not "all"
-        if state and state.lower() != "all":
-            variables["state"] = state.lower()
+        while True:
+            # Build variables
+            variables = {
+                "limit": limit,
+                "page": page,
+            }
 
-        # Add workspace_ids if workspace_id is specified (API-level filtering)
-        if workspace_id:
-            variables["workspace_ids"] = [str(workspace_id)]
+            # Add state if not "all"
+            if state and state.lower() != "all":
+                variables["state"] = state.lower()
 
-        result = client.execute_query(GET_BOARDS, variables)
+            # Add workspace_ids if workspace_id is specified (API-level filtering)
+            if workspace_id:
+                variables["workspace_ids"] = [str(workspace_id)]
 
-        boards = result.get("boards", [])
+            result = client.execute_query(GET_BOARDS, variables)
+            boards = result.get("boards", [])
+
+            if not boards:
+                break
+
+            all_boards.extend(boards)
+
+            # If we got fewer boards than the limit, we've reached the end
+            if len(boards) < limit:
+                break
+
+            page += 1
+
+        boards = all_boards
 
         # Filter by workspace name if specified (client-side filtering)
         # Note: API doesn't support filtering by workspace name, only by ID
@@ -112,7 +110,7 @@ def list_boards(
         # Output as table or JSON
         if table:
             console = Console()
-            rich_table = Table(title=f"Boards (Page {page}, Showing {len(boards)} of {limit} max)")
+            rich_table = Table(title=f"Boards (Total: {len(boards)})")
 
             rich_table.add_column("ID", style="cyan", no_wrap=True)
             rich_table.add_column("Name", style="green")
@@ -125,7 +123,7 @@ def list_boards(
 
             for board in boards:
                 workspace = board.get("workspace", {})
-                workspace_name = workspace.get("name", "N/A") if workspace else "N/A"
+                workspace_name_val = workspace.get("name", "N/A") if workspace else "N/A"
                 workspace_id_str = str(workspace.get("id", "N/A")) if workspace else "N/A"
                 updated_at = board.get("updated_at", "N/A")
                 if updated_at != "N/A" and "T" in updated_at:
@@ -135,7 +133,7 @@ def list_boards(
                 rich_table.add_row(
                     str(board.get("id", "")),
                     board.get("name", ""),
-                    workspace_name,
+                    workspace_name_val,
                     workspace_id_str,
                     board.get("state", ""),
                     board.get("board_kind", ""),
@@ -144,14 +142,12 @@ def list_boards(
                 )
 
             console.print(rich_table)
-            typer.secho(f"\nTotal returned: {len(boards)}", fg=typer.colors.BLUE)
+            typer.secho(f"\nTotal boards: {len(boards)}", fg=typer.colors.BLUE)
         else:
             # Format output with metadata
             output = {
                 "boards": boards,
-                "total_returned": len(boards),
-                "page": page,
-                "limit": limit,
+                "total_count": len(boards),
             }
 
             if state:

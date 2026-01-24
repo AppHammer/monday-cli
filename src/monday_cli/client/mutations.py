@@ -78,3 +78,31 @@ mutation CreateDocBlock($docId: ID!, $type: DocBlockContentType!, $content: JSON
   }
 }
 """
+
+# Create group on a board
+CREATE_GROUP = """
+mutation CreateGroup($boardId: ID!, $groupName: String!, $groupColor: String) {
+  create_group(
+    board_id: $boardId
+    group_name: $groupName
+    group_color: $groupColor
+  ) {
+    id
+    title
+    color
+  }
+}
+"""
+
+# Delete group from a board
+DELETE_GROUP = """
+mutation DeleteGroup($boardId: ID!, $groupId: String!) {
+  delete_group(
+    board_id: $boardId
+    group_id: $groupId
+  ) {
+    id
+    deleted
+  }
+}
+"""

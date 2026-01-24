@@ -21,7 +21,7 @@ from monday_cli.utils.output import print_json
 
 @items_app.command("get")
 def get_item(
-    item_id: int = typer.Argument(..., help="ID of the item to retrieve"),
+    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item to retrieve"),
 ) -> None:
     """Get all information for a specific item by ID.
 
@@ -32,8 +32,19 @@ def get_item(
     - Assets (files/documents)
     - Updates
     - Subitems
+
+    Example:
+        monday items get --item-id 1234567890
     """
     try:
+        if item_id is None:
+            typer.secho(
+                "Error: Item ID is required. Use --item-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday items get --item-id 1234567890", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
         client = get_client()
         result = client.execute_query(GET_ITEM_BY_ID, {"itemIds": [str(item_id)]})
 
@@ -63,8 +74,8 @@ def get_item(
 
 @items_app.command("create")
 def create_item(
-    board_id: int = typer.Argument(..., help="ID of the board to create item on"),
-    item_name: str = typer.Argument(..., help="Name of the new item"),
+    board_id: Optional[int] = typer.Option(None, "--board-id", "-b", help="ID of the board to create item on"),
+    item_name: Optional[str] = typer.Option(None, "--name", "-n", help="Name of the new item"),
     group_id: Optional[str] = typer.Option(None, "--group-id", "-g", help="Group ID (optional)"),
     column_values: Optional[str] = typer.Option(
         None,
@@ -76,13 +87,29 @@ def create_item(
     """Create a new item on a board.
 
     Example:
-        monday items create 1234567890 "New Task"
+        monday items create --board-id 1234567890 --name "New Task"
 
-        monday items create 1234567890 "New Task" --group-id "topics"
+        monday items create --board-id 1234567890 --name "New Task" --group-id "topics"
 
-        monday items create 1234567890 "New Task" --column-values '{"status":{"index":1}}'
+        monday items create --board-id 1234567890 --name "New Task" --column-values '{"status":{"index":1}}'
     """
     try:
+        if board_id is None:
+            typer.secho(
+                "Error: Board ID is required. Use --board-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday items create --board-id 1234567890 --name \"New Task\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
+        if item_name is None:
+            typer.secho(
+                "Error: Item name is required. Use --name",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday items create --board-id 1234567890 --name \"New Task\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
         client = get_client()
 
         # Parse column values if provided
@@ -134,130 +161,49 @@ def create_item(
         raise typer.Exit(1)
 
 
-@items_app.command("list-statuses")
-def list_statuses(
-    item_id: int = typer.Argument(..., help="ID of the item"),
+@items_app.command("update")
+def update_item(
+    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item"),
+    title: Optional[str] = typer.Option(None, "--title", "-t", help="Column title (e.g., 'Status', 'Github Issue Link')"),
+    value: Optional[str] = typer.Option(None, "--value", "-v", help="Value to set"),
 ) -> None:
-    """List all available status columns and their options for an item's board.
+    """Update an item column value using human-readable column titles.
 
-    This command fetches the item's board and displays all status columns
-    with their available status options.
+    This command automatically determines the column type and formats the value
+    appropriately. Supports status, text, link, date, and other column types.
 
     Example:
-        monday items list-statuses 1234567890
+        monday items update --item-id 1234567890 --title "Status" --value "Done"
+
+        monday items update --item-id 1234567890 --title "Github Issue Link" --value "https://foo.com"
+
+        monday items update --item-id 1234567890 --title "Due Date" --value "2024-12-31"
     """
     try:
-        client = get_client()
-
-        # First, get the item to find its board ID
-        result = client.execute_query(GET_ITEM_BY_ID, {"itemIds": [str(item_id)]})
-        items = result.get("items", [])
-
-        if not items:
-            typer.secho(f"Item {item_id} not found", fg=typer.colors.YELLOW)
-            raise typer.Exit(1)
-
-        item = items[0]
-        board = item.get("board")
-
-        if not board:
-            typer.secho("Error: Could not determine board for item", fg=typer.colors.RED)
-            raise typer.Exit(1)
-
-        board_id = board["id"]
-        board_name = board["name"]
-
-        # Get board columns with settings
-        columns_result = client.execute_query(
-            GET_BOARD_COLUMNS,
-            {"boardIds": [board_id]}
-        )
-
-        boards = columns_result.get("boards", [])
-        if not boards:
-            typer.secho("Error: Could not fetch board columns", fg=typer.colors.RED)
-            raise typer.Exit(1)
-
-        board_data = boards[0]
-        columns = board_data.get("columns", [])
-
-        # Filter and parse status columns
-        status_columns = []
-        for col in columns:
-            if col.get("type") == "status" and col.get("settings_str"):
-                try:
-                    settings = json.loads(col["settings_str"])
-                    labels = settings.get("labels", {})
-
-                    status_options = [
-                        {
-                            "index": int(idx),
-                            "label": label
-                        }
-                        for idx, label in labels.items()
-                    ]
-
-                    # Sort by index
-                    status_options.sort(key=lambda x: x["index"])
-
-                    status_columns.append({
-                        "column_id": col["id"],
-                        "column_title": col["title"],
-                        "statuses": status_options
-                    })
-                except (json.JSONDecodeError, AttributeError, ValueError):
-                    continue
-
-        if not status_columns:
+        if item_id is None:
             typer.secho(
-                f"No status columns found on board '{board_name}' (ID: {board_id})",
-                fg=typer.colors.YELLOW
+                "Error: Item ID is required. Use --item-id",
+                fg=typer.colors.RED,
             )
-            raise typer.Exit(0)
+            typer.secho("Example: monday items update --item-id 1234567890 --title \"Status\" --value \"Done\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
 
-        # Output results
-        output = {
-            "board_id": board_id,
-            "board_name": board_name,
-            "item_id": str(item_id),
-            "status_columns": status_columns
-        }
+        if title is None:
+            typer.secho(
+                "Error: Column title is required. Use --title",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday items update --item-id 1234567890 --title \"Status\" --value \"Done\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
 
-        print_json(output)
+        if value is None:
+            typer.secho(
+                "Error: Value is required. Use --value",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday items update --item-id 1234567890 --title \"Status\" --value \"Done\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
 
-    except AuthenticationError:
-        typer.secho(
-            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(1)
-    except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
-        raise typer.Exit(1)
-    except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-    except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-
-
-@items_app.command("update-status")
-def update_item_status(
-    item_id: int = typer.Argument(..., help="ID of the item"),
-    column_id: str = typer.Argument(..., help="ID of the status column"),
-    status_label: str = typer.Argument(..., help="Status label (e.g., 'Done', 'In Progress')"),
-) -> None:
-    """Update the status of an item using a human-readable status label.
-
-    First fetches available statuses to find the index for the given label,
-    then updates the item's status column.
-
-    Example:
-        monday items update-status 1234567890 status "Done"
-        monday items update-status 1234567890 status_1 "In Progress"
-    """
-    try:
         client = get_client()
 
         # First, get the item to find its board ID
@@ -277,7 +223,7 @@ def update_item_status(
 
         board_id = board["id"]
 
-        # Get board columns to find status options
+        # Get board columns to find the column by title
         columns_result = client.execute_query(
             GET_BOARD_COLUMNS,
             {"boardIds": [board_id]}
@@ -291,69 +237,103 @@ def update_item_status(
         board_data = boards[0]
         columns = board_data.get("columns", [])
 
-        # Find the specified column and get its status options
+        # Find the column by title (case-insensitive)
         target_column = None
+        title_lower = title.lower()
         for col in columns:
-            if col["id"] == column_id:
+            if col["title"].lower() == title_lower:
                 target_column = col
                 break
 
         if not target_column:
+            available_titles = ", ".join(f"'{col['title']}'" for col in columns)
             typer.secho(
-                f"Error: Column '{column_id}' not found on board {board_id}",
+                f"Error: Column with title '{title}' not found on board {board_id}",
                 fg=typer.colors.RED
             )
+            typer.secho(f"Available columns: {available_titles}", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
-        if target_column.get("type") != "status":
-            typer.secho(
-                f"Error: Column '{column_id}' is not a status column (type: {target_column.get('type')})",
-                fg=typer.colors.RED
-            )
-            raise typer.Exit(1)
+        column_id = target_column["id"]
+        column_type = target_column.get("type")
 
-        # Parse status options
-        settings_str = target_column.get("settings_str")
-        if not settings_str:
-            typer.secho(
-                f"Error: Column '{column_id}' has no status options configured",
-                fg=typer.colors.RED
-            )
-            raise typer.Exit(1)
+        # Format value based on column type
+        formatted_value = None
 
-        try:
-            settings = json.loads(settings_str)
-            labels = settings.get("labels", {})
-        except json.JSONDecodeError:
-            typer.secho("Error: Could not parse column settings", fg=typer.colors.RED)
-            raise typer.Exit(1)
+        if column_type == "status":
+            # For status columns, find the index for the given label
+            settings_str = target_column.get("settings_str")
+            if not settings_str:
+                typer.secho(
+                    f"Error: Status column '{title}' has no status options configured",
+                    fg=typer.colors.RED
+                )
+                raise typer.Exit(1)
 
-        # Find the status index for the given label (case-insensitive)
-        status_index = None
-        status_label_lower = status_label.lower()
+            try:
+                settings = json.loads(settings_str)
+                labels = settings.get("labels", {})
+            except json.JSONDecodeError:
+                typer.secho("Error: Could not parse column settings", fg=typer.colors.RED)
+                raise typer.Exit(1)
 
-        for idx, label in labels.items():
-            if label.lower() == status_label_lower:
-                status_index = int(idx)
-                break
+            # Find the status index for the given label (case-insensitive)
+            status_index = None
+            value_lower = value.lower()
 
-        if status_index is None:
-            available_labels = ", ".join(f"'{label}'" for label in labels.values())
-            typer.secho(
-                f"Error: Status '{status_label}' not found in column '{column_id}'",
-                fg=typer.colors.RED
-            )
-            typer.secho(f"Available statuses: {available_labels}", fg=typer.colors.YELLOW)
-            raise typer.Exit(1)
+            for idx, label in labels.items():
+                if label.lower() == value_lower:
+                    status_index = int(idx)
+                    break
 
-        # Update the status
-        status_value = json.dumps({"index": status_index})
+            if status_index is None:
+                available_labels = ", ".join(f"'{label}'" for label in labels.values())
+                typer.secho(
+                    f"Error: Status '{value}' not found in column '{title}'",
+                    fg=typer.colors.RED
+                )
+                typer.secho(f"Available statuses: {available_labels}", fg=typer.colors.YELLOW)
+                raise typer.Exit(1)
 
+            formatted_value = json.dumps({"index": status_index})
+
+        elif column_type == "text":
+            # Plain text column
+            formatted_value = json.dumps(value)
+
+        elif column_type == "link":
+            # Link column
+            formatted_value = json.dumps({"url": value, "text": value})
+
+        elif column_type == "date":
+            # Date column
+            formatted_value = json.dumps({"date": value})
+
+        elif column_type == "numbers":
+            # Numbers column
+            formatted_value = json.dumps(value)
+
+        elif column_type == "long-text":
+            # Long text column
+            formatted_value = json.dumps({"text": value})
+
+        else:
+            # For other column types, try to pass the value as-is
+            # User may need to provide JSON for complex types
+            try:
+                # Try to parse as JSON first
+                json.loads(value)
+                formatted_value = value
+            except json.JSONDecodeError:
+                # If not JSON, wrap as string
+                formatted_value = json.dumps(value)
+
+        # Update the column value
         variables = {
             "boardId": board_id,
             "itemId": str(item_id),
             "columnId": column_id,
-            "value": status_value,
+            "value": formatted_value,
         }
 
         update_result = client.execute_mutation(CHANGE_COLUMN_VALUE, variables)
@@ -361,12 +341,12 @@ def update_item_status(
 
         if updated_item:
             typer.secho(
-                f"✓ Status updated to '{status_label}' successfully!",
+                f"✓ Item column '{title}' updated to '{value}' successfully!",
                 fg=typer.colors.GREEN
             )
             print_json(updated_item)
         else:
-            typer.secho("Error: Failed to update item status", fg=typer.colors.RED)
+            typer.secho("Error: Failed to update item column", fg=typer.colors.RED)
             raise typer.Exit(1)
 
     except AuthenticationError:
@@ -388,7 +368,7 @@ def update_item_status(
 
 @items_app.command("list-columns")
 def list_columns(
-    item_id: int = typer.Argument(..., help="ID of the item"),
+    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item"),
 ) -> None:
     """List all board columns for an item in an easy-to-use format.
 
@@ -396,9 +376,17 @@ def list_columns(
     to see column IDs and types for use in update commands.
 
     Example:
-        monday items list-columns 1234567890
+        monday items list-columns --item-id 1234567890
     """
     try:
+        if item_id is None:
+            typer.secho(
+                "Error: Item ID is required. Use --item-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday items list-columns --item-id 1234567890", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
         client = get_client()
 
         # First, get the item to find its board ID

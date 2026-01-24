@@ -14,7 +14,6 @@ from monday_cli.utils.output import print_json
 
 @workspaces_app.command("list")
 def list_workspaces(
-    limit: int = typer.Option(100, "--limit", "-l", help="Number of workspaces to return"),
     membership_kind: Optional[str] = typer.Option(
         "all",
         "--membership-kind",
@@ -34,10 +33,10 @@ def list_workspaces(
     By default, shows all workspaces you have access to.
     Use --membership-kind to filter by membership type.
 
+    Fetches all workspaces without pagination.
+
     Example:
         monday workspaces list
-
-        monday workspaces list --limit 50
 
         monday workspaces list --membership-kind member
 
@@ -55,19 +54,13 @@ def list_workspaces(
             )
             raise typer.Exit(1)
 
-        # Validate limit
-        if limit < 1:
-            typer.secho(
-                "Error: Limit must be greater than 0",
-                fg=typer.colors.RED,
-            )
-            raise typer.Exit(1)
-
         client = get_client()
 
         # Build variables
+        # Note: Monday.com API doesn't have cursor-based pagination for workspaces
+        # We'll use a large limit to fetch all at once
         variables = {
-            "limit": limit,
+            "limit": 1000,  # Large enough to get all workspaces
         }
 
         # Add membership_kind if not "all"
@@ -101,7 +94,7 @@ def list_workspaces(
         # Output as table or JSON
         if table:
             console = Console()
-            rich_table = Table(title=f"Workspaces (Showing {len(workspaces)})")
+            rich_table = Table(title=f"Workspaces (Total: {len(workspaces)})")
 
             rich_table.add_column("ID", style="cyan", no_wrap=True)
             rich_table.add_column("Name", style="green")
@@ -127,13 +120,12 @@ def list_workspaces(
                 )
 
             console.print(rich_table)
-            typer.secho(f"\nTotal returned: {len(workspaces)}", fg=typer.colors.BLUE)
+            typer.secho(f"\nTotal workspaces: {len(workspaces)}", fg=typer.colors.BLUE)
         else:
             # Format output with metadata
             output = {
                 "workspaces": workspaces,
-                "total_returned": len(workspaces),
-                "limit": limit,
+                "total_count": len(workspaces),
             }
 
             if membership_kind:

@@ -21,6 +21,7 @@ boards_app = typer.Typer(help="Manage Monday.com boards")
 groups_app = typer.Typer(help="Manage Monday.com groups")
 items_app = typer.Typer(help="Manage Monday.com items")
 subitems_app = typer.Typer(help="Manage Monday.com subitems")
+statuses_app = typer.Typer(help="Manage Monday.com status columns")
 updates_app = typer.Typer(help="Manage Monday.com updates")
 docs_app = typer.Typer(help="Manage Monday.com documents")
 
@@ -29,6 +30,7 @@ app.add_typer(boards_app, name="boards")
 app.add_typer(groups_app, name="groups")
 app.add_typer(items_app, name="items")
 app.add_typer(subitems_app, name="subitems")
+app.add_typer(statuses_app, name="statuses")
 app.add_typer(updates_app, name="updates")
 app.add_typer(docs_app, name="docs")
 
@@ -114,4 +116,4 @@ if __name__ == "__main__":
 
 
 # Import command modules to register commands (after all functions are defined)
-from monday_cli.commands import boards, docs, groups, items, subitems, updates, workspaces  # noqa: F401, E402
+from monday_cli.commands import boards, docs, groups, items, statuses, subitems, updates, workspaces  # noqa: F401, E402

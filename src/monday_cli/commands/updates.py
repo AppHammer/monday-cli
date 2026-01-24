@@ -1,5 +1,7 @@
 """Commands for managing Monday.com updates."""
 
+from typing import Optional
+
 import typer
 
 from monday_cli.cli import get_client, updates_app
@@ -10,19 +12,35 @@ from monday_cli.utils.output import print_json
 
 @updates_app.command("create")
 def create_update(
-    item_id: int = typer.Argument(..., help="ID of the item or subitem"),
-    body: str = typer.Argument(..., help="Update text content"),
+    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item or subitem"),
+    body: Optional[str] = typer.Option(None, "--body", "-b", help="Update text content"),
 ) -> None:
     """Create an update on an item or subitem.
 
     This command works for both regular items and subitems.
 
     Example:
-        monday updates create 1234567890 "Work in progress"
+        monday updates create --item-id 1234567890 --body "Work in progress"
 
-        monday updates create 9999999999 "Completed subtask"
+        monday updates create --item-id 9999999999 --body "Completed subtask"
     """
     try:
+        if item_id is None:
+            typer.secho(
+                "Error: Item ID is required. Use --item-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday updates create --item-id 1234567890 --body \"Work in progress\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
+        if body is None:
+            typer.secho(
+                "Error: Body text is required. Use --body",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday updates create --item-id 1234567890 --body \"Work in progress\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
         client = get_client()
 
         variables = {

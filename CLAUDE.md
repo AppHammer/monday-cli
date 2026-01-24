@@ -268,9 +268,14 @@ Always handle these exceptions in order:
 
 Always `raise typer.Exit(1)` after error messages.
 
-### When Adding Similar Commands for Items/Subitems
+### Development Guidelines
 
-If adding a command to `items.py`, consider if it should also exist in `subitems.py`. The patterns are often identical, just operating on different resources.
+- always use named arguments over positional for clarity
+  `monday items get --item-id 123` instead of `monday items get 123`
+- all `list` commands should support `--table` option for tabular output
+- do not paginate results in CLI; fetch all and let user filter if needed
+- standard commands `list`, `get`, `create`, `update`, `delete` for resources
+
 
 ### Testing Changes
 

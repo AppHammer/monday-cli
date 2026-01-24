@@ -20,6 +20,51 @@ from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, 
 from monday_cli.utils.output import print_json
 
 
+@subitems_app.command("get")
+def get_subitem(
+    subitem_id: Optional[int] = typer.Option(None, "--subitem-id", help="Subitem ID"),
+) -> None:
+    """Get a single subitem by ID.
+
+    Example:
+        monday subitems get --subitem-id 1234567890
+    """
+    if subitem_id is None:
+        typer.secho(
+            "Error: --subitem-id is required\n"
+            "Usage: monday subitems get --subitem-id <id>",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+
+    try:
+        client = get_client()
+        result = client.execute_query(GET_ITEM_BY_ID, {"itemIds": [str(subitem_id)]})
+        items = result.get("items", [])
+
+        if not items:
+            typer.secho(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
+            raise typer.Exit(1)
+
+        print_json(items[0])
+
+    except AuthenticationError:
+        typer.secho(
+            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    except RateLimitError as e:
+        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    except MondayAPIError as e:
+        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+
 @subitems_app.command("list")
 def list_subitems(
     item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the parent item to list subitems from"),
@@ -91,23 +136,30 @@ def list_subitems(
 
                 rich_table.add_column("ID", style="cyan", no_wrap=True)
                 rich_table.add_column("Name", style="green")
-                rich_table.add_column("State", style="yellow")
-                rich_table.add_column("Board", style="blue")
+                rich_table.add_column("Parent ID", style="blue", no_wrap=True)
+                rich_table.add_column("Status", style="yellow")
                 rich_table.add_column("Creator", style="magenta")
                 rich_table.add_column("Created", style="dim")
 
                 for subitem in subitems:
-                    board_name = subitem.get("board", {}).get("name", "N/A") if subitem.get("board") else "N/A"
                     creator_name = subitem.get("creator", {}).get("name", "N/A") if subitem.get("creator") else "N/A"
                     created_at = subitem.get("created_at", "N/A")
                     if created_at != "N/A" and "T" in created_at:
                         created_at = created_at.split("T")[0]
 
+                    # Extract status from column_values
+                    status_text = "N/A"
+                    column_values = subitem.get("column_values", [])
+                    for col in column_values:
+                        if col.get("type") == "status":
+                            status_text = col.get("text", "N/A") or "N/A"
+                            break
+
                     rich_table.add_row(
                         str(subitem.get("id", "")),
                         subitem.get("name", ""),
-                        subitem.get("state", ""),
-                        board_name,
+                        str(item_id),
+                        status_text,
                         creator_name,
                         created_at,
                     )
@@ -245,7 +297,7 @@ def list_subitems(
 
                 rich_table.add_column("ID", style="cyan", no_wrap=True)
                 rich_table.add_column("Name", style="green")
-                rich_table.add_column("State", style="yellow")
+                rich_table.add_column("Status", style="yellow")
                 rich_table.add_column("Group", style="blue")
                 rich_table.add_column("Creator", style="magenta")
                 rich_table.add_column("Created", style="dim")
@@ -257,10 +309,18 @@ def list_subitems(
                     if created_at != "N/A" and "T" in created_at:
                         created_at = created_at.split("T")[0]
 
+                    # Extract status from column_values
+                    status_text = "N/A"
+                    column_values = subitem.get("column_values", [])
+                    for col in column_values:
+                        if col.get("type") == "status":
+                            status_text = col.get("text", "N/A") or "N/A"
+                            break
+
                     rich_table.add_row(
                         str(subitem.get("id", "")),
                         subitem.get("name", ""),
-                        subitem.get("state", ""),
+                        status_text,
                         group_title,
                         creator_name,
                         created_at,
@@ -316,8 +376,8 @@ def list_subitems(
 
 @subitems_app.command("create")
 def create_subitem(
-    parent_item_id: int = typer.Argument(..., help="ID of the parent item"),
-    subitem_name: str = typer.Argument(..., help="Name of the new subitem"),
+    parent_item_id: Optional[int] = typer.Option(None, "--parent-item-id", "-p", help="ID of the parent item"),
+    subitem_name: Optional[str] = typer.Option(None, "--name", "-n", help="Name of the new subitem"),
     column_values: Optional[str] = typer.Option(
         None,
         "--column-values",
@@ -328,11 +388,27 @@ def create_subitem(
     """Create a new subitem under a parent item.
 
     Example:
-        monday subitems create 1234567890 "New Subtask"
+        monday subitems create --parent-item-id 1234567890 --name "New Subtask"
 
-        monday subitems create 1234567890 "New Subtask" --column-values '{"status":{"index":1}}'
+        monday subitems create --parent-item-id 1234567890 --name "New Subtask" --column-values '{"status":{"index":1}}'
     """
     try:
+        if parent_item_id is None:
+            typer.secho(
+                "Error: Parent item ID is required. Use --parent-item-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday subitems create --parent-item-id 1234567890 --name \"New Subtask\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
+        if subitem_name is None:
+            typer.secho(
+                "Error: Subitem name is required. Use --name",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday subitems create --parent-item-id 1234567890 --name \"New Subtask\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
         client = get_client()
 
         # Parse column values if provided
@@ -381,64 +457,9 @@ def create_subitem(
         raise typer.Exit(1)
 
 
-@subitems_app.command("update-status")
-def update_subitem_status(
-    subitem_id: int = typer.Argument(..., help="ID of the subitem"),
-    board_id: int = typer.Argument(..., help="ID of the board containing the subitem"),
-    column_id: str = typer.Argument(..., help="ID of the status column"),
-    status_index: int = typer.Argument(..., help="Status index (e.g., 0, 1, 2)"),
-) -> None:
-    """Update the status of a subitem.
-
-    The status_index corresponds to the position of the status in the column settings.
-    For example, if your status column has: Done (0), Working (1), Stuck (2)
-
-    Example:
-        monday subitems update-status 9999999999 1234567890 status 1
-    """
-    try:
-        client = get_client()
-
-        # Format the status value as Monday.com expects
-        status_value = json.dumps({"index": status_index})
-
-        variables = {
-            "boardId": str(board_id),
-            "itemId": str(subitem_id),
-            "columnId": column_id,
-            "value": status_value,
-        }
-
-        result = client.execute_mutation(CHANGE_COLUMN_VALUE, variables)
-        updated_item = result.get("change_column_value")
-
-        if updated_item:
-            typer.secho("✓ Subitem status updated successfully!", fg=typer.colors.GREEN)
-            print_json(updated_item)
-        else:
-            typer.secho("Error: Failed to update subitem status", fg=typer.colors.RED)
-            raise typer.Exit(1)
-
-    except AuthenticationError:
-        typer.secho(
-            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(1)
-    except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
-        raise typer.Exit(1)
-    except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-    except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-
-
 @subitems_app.command("list-columns")
 def list_columns(
-    subitem_id: int = typer.Argument(..., help="ID of the subitem"),
+    subitem_id: Optional[int] = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem"),
 ) -> None:
     """List all board columns for a subitem in an easy-to-use format.
 
@@ -446,9 +467,17 @@ def list_columns(
     to see column IDs and types for use in update commands.
 
     Example:
-        monday subitems list-columns 9999999999
+        monday subitems list-columns --subitem-id 9999999999
     """
     try:
+        if subitem_id is None:
+            typer.secho(
+                "Error: Subitem ID is required. Use --subitem-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday subitems list-columns --subitem-id 9999999999", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
         client = get_client()
 
         # First, get the subitem to find its board ID
@@ -537,7 +566,7 @@ def list_columns(
 
 @subitems_app.command("list-statuses")
 def list_statuses(
-    subitem_id: int = typer.Argument(..., help="ID of the subitem"),
+    subitem_id: Optional[int] = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem"),
 ) -> None:
     """List all available status columns and their options for a subitem's board.
 
@@ -545,9 +574,17 @@ def list_statuses(
     with their available status options.
 
     Example:
-        monday subitems list-statuses 9999999999
+        monday subitems list-statuses --subitem-id 9999999999
     """
     try:
+        if subitem_id is None:
+            typer.secho(
+                "Error: Subitem ID is required. Use --subitem-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday subitems list-statuses --subitem-id 9999999999", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
         client = get_client()
 
         # First, get the subitem to find its board ID
@@ -643,23 +680,49 @@ def list_statuses(
         raise typer.Exit(1)
 
 
-@subitems_app.command("update-status-label")
-def update_subitem_status_label(
-    subitem_id: int = typer.Argument(..., help="ID of the subitem"),
-    column_id: str = typer.Argument(..., help="ID of the status column"),
-    status_label: str = typer.Argument(..., help="Status label (e.g., 'Done', 'In Progress')"),
+@subitems_app.command("update")
+def update_subitem(
+    subitem_id: Optional[int] = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem"),
+    title: Optional[str] = typer.Option(None, "--title", "-t", help="Column title (e.g., 'Status', 'Github Issue Link')"),
+    value: Optional[str] = typer.Option(None, "--value", "-v", help="Value to set"),
 ) -> None:
-    """Update the status of a subitem using a human-readable status label.
+    """Update a subitem column value using human-readable column titles.
 
-    First fetches available statuses to find the index for the given label,
-    then updates the subitem's status column. This is an alternative to
-    'update-status' which requires knowing the status index.
+    This command automatically determines the column type and formats the value
+    appropriately. Supports status, text, link, date, and other column types.
 
     Example:
-        monday subitems update-status-label 9999999999 status "Done"
-        monday subitems update-status-label 9999999999 status_1 "In Progress"
+        monday subitems update --subitem-id 9999999999 --title "Status" --value "Ready For Work"
+
+        monday subitems update --subitem-id 9999999999 --title "Github Issue Link" --value "https://foo.com"
+
+        monday subitems update --subitem-id 9999999999 --title "Due Date" --value "2024-12-31"
     """
     try:
+        if subitem_id is None:
+            typer.secho(
+                "Error: Subitem ID is required. Use --subitem-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday subitems update --subitem-id 9999999999 --title \"Status\" --value \"Ready For Work\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
+        if title is None:
+            typer.secho(
+                "Error: Column title is required. Use --title",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday subitems update --subitem-id 9999999999 --title \"Status\" --value \"Ready For Work\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
+        if value is None:
+            typer.secho(
+                "Error: Value is required. Use --value",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday subitems update --subitem-id 9999999999 --title \"Status\" --value \"Ready For Work\"", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
         client = get_client()
 
         # First, get the subitem to find its board ID
@@ -679,7 +742,7 @@ def update_subitem_status_label(
 
         board_id = board["id"]
 
-        # Get board columns to find status options
+        # Get board columns to find the column by title
         columns_result = client.execute_query(
             GET_BOARD_COLUMNS,
             {"boardIds": [board_id]}
@@ -693,69 +756,103 @@ def update_subitem_status_label(
         board_data = boards[0]
         columns = board_data.get("columns", [])
 
-        # Find the specified column and get its status options
+        # Find the column by title (case-insensitive)
         target_column = None
+        title_lower = title.lower()
         for col in columns:
-            if col["id"] == column_id:
+            if col["title"].lower() == title_lower:
                 target_column = col
                 break
 
         if not target_column:
+            available_titles = ", ".join(f"'{col['title']}'" for col in columns)
             typer.secho(
-                f"Error: Column '{column_id}' not found on board {board_id}",
+                f"Error: Column with title '{title}' not found on board {board_id}",
                 fg=typer.colors.RED
             )
+            typer.secho(f"Available columns: {available_titles}", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
-        if target_column.get("type") != "status":
-            typer.secho(
-                f"Error: Column '{column_id}' is not a status column (type: {target_column.get('type')})",
-                fg=typer.colors.RED
-            )
-            raise typer.Exit(1)
+        column_id = target_column["id"]
+        column_type = target_column.get("type")
 
-        # Parse status options
-        settings_str = target_column.get("settings_str")
-        if not settings_str:
-            typer.secho(
-                f"Error: Column '{column_id}' has no status options configured",
-                fg=typer.colors.RED
-            )
-            raise typer.Exit(1)
+        # Format value based on column type
+        formatted_value = None
 
-        try:
-            settings = json.loads(settings_str)
-            labels = settings.get("labels", {})
-        except json.JSONDecodeError:
-            typer.secho("Error: Could not parse column settings", fg=typer.colors.RED)
-            raise typer.Exit(1)
+        if column_type == "status":
+            # For status columns, find the index for the given label
+            settings_str = target_column.get("settings_str")
+            if not settings_str:
+                typer.secho(
+                    f"Error: Status column '{title}' has no status options configured",
+                    fg=typer.colors.RED
+                )
+                raise typer.Exit(1)
 
-        # Find the status index for the given label (case-insensitive)
-        status_index = None
-        status_label_lower = status_label.lower()
+            try:
+                settings = json.loads(settings_str)
+                labels = settings.get("labels", {})
+            except json.JSONDecodeError:
+                typer.secho("Error: Could not parse column settings", fg=typer.colors.RED)
+                raise typer.Exit(1)
 
-        for idx, label in labels.items():
-            if label.lower() == status_label_lower:
-                status_index = int(idx)
-                break
+            # Find the status index for the given label (case-insensitive)
+            status_index = None
+            value_lower = value.lower()
 
-        if status_index is None:
-            available_labels = ", ".join(f"'{label}'" for label in labels.values())
-            typer.secho(
-                f"Error: Status '{status_label}' not found in column '{column_id}'",
-                fg=typer.colors.RED
-            )
-            typer.secho(f"Available statuses: {available_labels}", fg=typer.colors.YELLOW)
-            raise typer.Exit(1)
+            for idx, label in labels.items():
+                if label.lower() == value_lower:
+                    status_index = int(idx)
+                    break
 
-        # Update the status
-        status_value = json.dumps({"index": status_index})
+            if status_index is None:
+                available_labels = ", ".join(f"'{label}'" for label in labels.values())
+                typer.secho(
+                    f"Error: Status '{value}' not found in column '{title}'",
+                    fg=typer.colors.RED
+                )
+                typer.secho(f"Available statuses: {available_labels}", fg=typer.colors.YELLOW)
+                raise typer.Exit(1)
 
+            formatted_value = json.dumps({"index": status_index})
+
+        elif column_type == "text":
+            # Plain text column
+            formatted_value = json.dumps(value)
+
+        elif column_type == "link":
+            # Link column
+            formatted_value = json.dumps({"url": value, "text": value})
+
+        elif column_type == "date":
+            # Date column
+            formatted_value = json.dumps({"date": value})
+
+        elif column_type == "numbers":
+            # Numbers column
+            formatted_value = json.dumps(value)
+
+        elif column_type == "long-text":
+            # Long text column
+            formatted_value = json.dumps({"text": value})
+
+        else:
+            # For other column types, try to pass the value as-is
+            # User may need to provide JSON for complex types
+            try:
+                # Try to parse as JSON first
+                json.loads(value)
+                formatted_value = value
+            except json.JSONDecodeError:
+                # If not JSON, wrap as string
+                formatted_value = json.dumps(value)
+
+        # Update the column value
         variables = {
             "boardId": board_id,
             "itemId": str(subitem_id),
             "columnId": column_id,
-            "value": status_value,
+            "value": formatted_value,
         }
 
         update_result = client.execute_mutation(CHANGE_COLUMN_VALUE, variables)
@@ -763,12 +860,12 @@ def update_subitem_status_label(
 
         if updated_subitem:
             typer.secho(
-                f"✓ Subitem status updated to '{status_label}' successfully!",
+                f"✓ Subitem column '{title}' updated to '{value}' successfully!",
                 fg=typer.colors.GREEN
             )
             print_json(updated_subitem)
         else:
-            typer.secho("Error: Failed to update subitem status", fg=typer.colors.RED)
+            typer.secho("Error: Failed to update subitem column", fg=typer.colors.RED)
             raise typer.Exit(1)
 
     except AuthenticationError:

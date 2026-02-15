@@ -106,3 +106,14 @@ mutation DeleteGroup($boardId: ID!, $groupId: String!) {
   }
 }
 """
+
+# Delete item (works for both items and subitems)
+DELETE_ITEM = """
+mutation DeleteItem($itemId: ID!) {
+  delete_item(
+    item_id: $itemId
+  ) {
+    id
+  }
+}
+"""

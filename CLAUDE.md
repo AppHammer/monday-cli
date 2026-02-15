@@ -175,6 +175,7 @@ Uses Typer (v0.21.0+) with **8 command groups**:
    - `list` - List items with pagination and group filtering
    - `create` - Create new item
    - `update` - Update item column value using human-readable titles
+   - `delete` - Delete item with confirmation
    - `list-columns` - List all board columns with types and options
 
 5. **`monday subitems <command>`** - Subitem operations
@@ -182,6 +183,7 @@ Uses Typer (v0.21.0+) with **8 command groups**:
    - `list` - List subitems with pagination (by item or board)
    - `create` - Create new subitem
    - `update` - Update subitem column value using human-readable titles
+   - `delete` - Delete subitem with confirmation
    - `list-columns` - List all board columns
    - `list-statuses` - List status columns with options
 
@@ -519,6 +521,22 @@ monday docs create --item-id 9876543210 --column-name "Notes" --content "Project
 
 # 2. Read document content
 monday docs get --item-id 9876543210 --column-name "Notes"
+```
+
+### Workflow: Deleting Items and Subitems
+
+```bash
+# Delete an item (with confirmation prompt)
+monday items delete --item-id 9876543210
+
+# Delete an item without confirmation (for scripts)
+monday items delete --item-id 9876543210 --force
+
+# Delete a subitem (with confirmation prompt)
+monday subitems delete --subitem-id 1111111111
+
+# Delete a subitem without confirmation (for scripts)
+monday subitems delete --subitem-id 1111111111 --force
 ```
 
 ### Workflow: Pagination

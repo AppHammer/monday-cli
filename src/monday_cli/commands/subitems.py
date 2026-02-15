@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from monday_cli.cli import get_client, subitems_app
-from monday_cli.client.mutations import CHANGE_COLUMN_VALUE, CREATE_SUBITEM
+from monday_cli.client.mutations import CHANGE_COLUMN_VALUE, CREATE_SUBITEM, DELETE_ITEM
 from monday_cli.client.queries import (
     GET_BOARD_COLUMNS,
     GET_BOARD_ITEMS,
@@ -867,6 +867,117 @@ def update_subitem(
         else:
             typer.secho("Error: Failed to update subitem column", fg=typer.colors.RED)
             raise typer.Exit(1)
+
+    except AuthenticationError:
+        typer.secho(
+            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    except RateLimitError as e:
+        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    except MondayAPIError as e:
+        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+
+@subitems_app.command("delete")
+def delete_subitem(
+    subitem_id: Optional[int] = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem to delete"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+) -> None:
+    """Delete a subitem from Monday.com.
+
+    WARNING: This action cannot be undone! The subitem and all its data will be permanently deleted.
+
+    By default, you will be prompted to confirm the deletion. Use --force to skip the prompt
+    (useful for automation scripts).
+
+    Example:
+        monday subitems delete --subitem-id 9999999999
+
+        monday subitems delete --subitem-id 9999999999 --force
+    """
+    try:
+        if subitem_id is None:
+            typer.secho(
+                "Error: Subitem ID is required. Use --subitem-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho("Example: monday subitems delete --subitem-id 9999999999", fg=typer.colors.BLUE)
+            raise typer.Exit(1)
+
+        client = get_client()
+
+        # First, get the subitem to verify it exists and get its name
+        result = client.execute_query(GET_ITEM_BY_ID, {"itemIds": [str(subitem_id)]})
+        items = result.get("items", [])
+
+        if not items:
+            typer.secho(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
+            raise typer.Exit(1)
+
+        subitem = items[0]
+        subitem_name = subitem.get("name", "Unknown")
+        board = subitem.get("board", {})
+        board_name = board.get("name", "Unknown") if board else "Unknown"
+
+        # Confirmation prompt (unless --force is used)
+        if not force:
+            typer.secho(
+                f"WARNING: This will permanently delete subitem '{subitem_name}' (ID: {subitem_id}) from board '{board_name}'!",
+                fg=typer.colors.YELLOW
+            )
+            typer.secho("This action cannot be undone.", fg=typer.colors.RED)
+            confirm_delete = typer.confirm("Are you sure you want to continue?")
+            if not confirm_delete:
+                typer.secho("Delete cancelled.", fg=typer.colors.BLUE)
+                raise typer.Exit(0)
+
+        # Execute delete mutation (same as items, since subitems are items in Monday's model)
+        variables = {"itemId": str(subitem_id)}
+        delete_result = client.execute_mutation(DELETE_ITEM, variables)
+        deleted_subitem = delete_result.get("delete_item")
+
+        if deleted_subitem:
+            typer.secho(
+                f"✓ Subitem '{subitem_name}' (ID: {subitem_id}) deleted successfully!",
+                fg=typer.colors.GREEN
+            )
+            output = {
+                "subitem_id": str(subitem_id),
+                "subitem_name": subitem_name,
+                "board_name": board_name,
+                "deleted": True,
+            }
+            print_json(output)
+        else:
+            # Deletion may have succeeded but returned no data
+            # Verify by trying to fetch the subitem again
+            typer.secho("Verifying deletion...", fg=typer.colors.YELLOW)
+            verify_result = client.execute_query(GET_ITEM_BY_ID, {"itemIds": [str(subitem_id)]})
+            verify_items = verify_result.get("items", [])
+
+            if not verify_items:
+                # Subitem is gone, deletion succeeded
+                typer.secho(
+                    f"✓ Subitem '{subitem_name}' (ID: {subitem_id}) deleted successfully!",
+                    fg=typer.colors.GREEN
+                )
+                output = {
+                    "subitem_id": str(subitem_id),
+                    "subitem_name": subitem_name,
+                    "board_name": board_name,
+                    "deleted": True,
+                }
+                print_json(output)
+            else:
+                typer.secho("Error: Failed to delete subitem", fg=typer.colors.RED)
+                raise typer.Exit(1)
 
     except AuthenticationError:
         typer.secho(

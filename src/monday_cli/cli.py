@@ -97,7 +97,8 @@ def main_callback(
 @app.command()
 def version() -> None:
     """Show version information."""
-    typer.echo("monday-cli version 0.1.0")
+    from monday_cli import __version__
+    typer.echo(f"monday-cli version {__version__}")
 
 
 def main() -> None:

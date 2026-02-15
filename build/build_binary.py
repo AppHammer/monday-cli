@@ -37,6 +37,8 @@ def build() -> None:
         "--hidden-import=tenacity",
         "--hidden-import=ratelimit",
         "--hidden-import=rich",
+        # Ensure package metadata is included for version detection
+        "--copy-metadata=monday-cli",
         # Optimize
         "--strip",  # Strip symbols (Linux)
         "--optimize=2",  # Python optimization level

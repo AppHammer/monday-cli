@@ -194,8 +194,9 @@ Uses Typer (v0.21.0+) with **8 command groups**:
    - `create` - Post update to item or subitem
 
 8. **`monday docs <command>`** - Document operations
-   - `create` - Create document in doc column
-   - `get` - Get document content
+   - `get` - Get document content as Markdown
+   - `append` - Append Markdown content to document (creates if needed)
+   - `put` - Replace document content with Markdown (clears existing content first)
 
 ### Built-in Commands
 - `monday version` - Show version information
@@ -437,14 +438,13 @@ Color format: `#ff642e` or `#f09`
 
 Monday.com doc columns can be managed programmatically:
 - Create documents with optional initial content
-- Retrieve document blocks (text, headings, etc.)
+- Replace document content (`put`) - clears all existing blocks, then writes new markdown
+- Append to document content (`append`) - adds markdown content without clearing
+- Retrieve document content as Markdown (`get`)
 - Lookup columns by name (case-insensitive)
 - Validates column type is `doc`
 
-The `docs get` command returns document blocks with:
-- Block ID
-- Block type (normal_text, heading, etc.)
-- Block content (JSON delta format)
+The `docs get` command returns Markdown content (falls back to block JSON if export not supported).
 
 ### Testing Changes
 
@@ -516,10 +516,13 @@ monday items list --board-id 1234567890 --group-id "topics" --table
 ### Workflow: Document Management
 
 ```bash
-# 1. Create a document in a doc column
-monday docs create --item-id 9876543210 --column-name "Notes" --content "Project requirements"
+# Replace document content with Markdown (clears existing, then writes new)
+monday docs put --item-id 9876543210 --column-name "Notes" --content "# Project Requirements\n\n- Item 1\n- Item 2"
 
-# 2. Read document content
+# Append content to existing document (or create new)
+monday docs append --item-id 9876543210 --column-name "Notes" --content "## Additional Notes\n\n- Item 3"
+
+# Read document content as Markdown
 monday docs get --item-id 9876543210 --column-name "Notes"
 ```
 

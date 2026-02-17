@@ -114,14 +114,39 @@ query {
 
 # Get document blocks and content
 GET_DOC_BLOCKS = """
-query GetDocBlocks($docIds: [ID!]!) {
+query GetDocBlocks($docIds: [ID!]!, $limit: Int, $page: Int) {
   docs(ids: $docIds) {
     id
-    blocks {
+    blocks(limit: $limit, page: $page) {
       id
       type
       content
     }
+  }
+}
+"""
+
+# Resolve object_id (from item column values) to internal doc id
+GET_DOC_BY_OBJECT_ID = """
+query GetDocByObjectId($objectIds: [ID!]) {
+  docs(object_ids: $objectIds) {
+    id
+    object_id
+  }
+  complexity {
+    before
+    after
+  }
+}
+"""
+
+# Export document content as markdown (requires internal doc id, not object_id)
+EXPORT_MARKDOWN_FROM_DOC = """
+query ExportMarkdownFromDoc($docId: ID!) {
+  export_markdown_from_doc(docId: $docId) {
+    success
+    markdown
+    error
   }
 }
 """

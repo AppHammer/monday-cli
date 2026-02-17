@@ -79,6 +79,33 @@ mutation CreateDocBlock($docId: ID!, $type: DocBlockContentType!, $content: JSON
 }
 """
 
+# Add content to a doc from markdown
+ADD_CONTENT_FROM_MARKDOWN = """
+mutation AddContentFromMarkdown($docId: ID!, $markdown: String!) {
+  add_content_to_doc_from_markdown(docId: $docId, markdown: $markdown) {
+    success
+    block_ids
+    error
+  }
+}
+"""
+
+# Delete a document block
+DELETE_DOC_BLOCK = """
+mutation DeleteDocBlock($blockId: String!) {
+  delete_doc_block(block_id: $blockId) {
+    id
+  }
+}
+"""
+
+# Delete a document
+DELETE_DOC = """
+mutation DeleteDoc($docId: ID!) {
+  delete_doc(docId: $docId)
+}
+"""
+
 # Create group on a board
 CREATE_GROUP = """
 mutation CreateGroup($boardId: ID!, $groupName: String!, $groupColor: String) {

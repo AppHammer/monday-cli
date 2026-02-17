@@ -1,5 +1,48 @@
 """GraphQL query templates for Monday.com API."""
 
+# Get item updates and replies (lightweight, no column_values)
+GET_ITEM_UPDATES = """
+query GetItemUpdates($itemIds: [ID!]!) {
+  items(ids: $itemIds) {
+    id
+    name
+    state
+    created_at
+    updated_at
+    creator_id
+    board {
+      id
+      name
+    }
+    group {
+      id
+      title
+    }
+    updates {
+      id
+      body
+      created_at
+      creator_id
+      assets {
+        id
+        name
+        url
+      }
+      replies {
+        id
+        body
+        created_at
+        creator_id
+      }
+    }
+  }
+  complexity {
+    before
+    after
+  }
+}
+"""
+
 # Get item by ID with all information
 GET_ITEM_BY_ID = """
 query GetItem($itemIds: [ID!]!) {
@@ -41,6 +84,12 @@ query GetItem($itemIds: [ID!]!) {
         id
         name
         url
+      }
+      replies {
+        id
+        body
+        created_at
+        creator_id
       }
     }
     subitems {

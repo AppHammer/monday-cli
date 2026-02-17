@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-02-17
+
+### Added
+- Update replies now included in `monday items get` output
+- `monday updates get` command to retrieve updates and replies for an item (without column values)
+- `Reply` model for update replies
+- `GET_ITEM_UPDATES` lightweight GraphQL query for fetching item updates
+
 ## [0.4.0] - 2026-02-17
 
 ### Added

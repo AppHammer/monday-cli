@@ -40,6 +40,15 @@ class Asset(BaseModel):
     created_at: str | None = None
 
 
+class Reply(BaseModel):
+    """Reply to an update."""
+
+    id: str
+    body: str
+    created_at: str
+    creator_id: str | None = None
+
+
 class Update(BaseModel):
     """Update information."""
 
@@ -48,6 +57,7 @@ class Update(BaseModel):
     created_at: str
     creator_id: str | None = None
     assets: list[Asset] | None = None
+    replies: list[Reply] | None = None
 
 
 class Subitem(BaseModel):

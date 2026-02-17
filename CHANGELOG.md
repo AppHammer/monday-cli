@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-17
+
+### Added
+- `monday docs put` command to replace document content with Markdown (clears existing content, then writes new)
+- `monday docs get` now returns document content as Markdown (with block JSON fallback)
+- `mondday docs append` command to add Markdown content to existing document without clearing
+- DELETE_DOC_BLOCK mutation for clearing individual document blocks
+- Paginated block fetching for reliable content clearing on large documents
+
+### Changed
+- Renamed `monday docs set` to `monday docs append` for clarity
+- Overhauled `monday docs get` to use markdown export instead of raw block JSON
+
 ## [0.3.0] - 2026-02-15
 
 ### Added

@@ -26,6 +26,7 @@ runner = CliRunner()
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_item(column_id: str = "col1", object_id: str = "42"):
     """Return a minimal items API response for a single item."""
     return {
@@ -108,17 +109,20 @@ def _build_mock_client(responses: list[Any]) -> MagicMock:
 # Test: Default JSON shape — export succeeds (AC1, AC2, AC3)
 # ---------------------------------------------------------------------------
 
+
 class TestDefaultJsonExportSucceeds:
     """Default path when Markdown export succeeds."""
 
     def _invoke(self, markdown: str = "# Hello\n\nWorld"):
-        mock_client = _build_mock_client([
-            _make_item(),                          # GET_ITEM_BY_ID
-            _make_board_columns(),                  # GET_BOARD_COLUMNS
-            _make_doc_by_object_id(),               # GET_DOC_BY_OBJECT_ID
-            _make_export_success(markdown),         # EXPORT_MARKDOWN_FROM_DOC
-            _make_doc_blocks(),                     # GET_DOC_BLOCKS
-        ])
+        mock_client = _build_mock_client(
+            [
+                _make_item(),  # GET_ITEM_BY_ID
+                _make_board_columns(),  # GET_BOARD_COLUMNS
+                _make_doc_by_object_id(),  # GET_DOC_BY_OBJECT_ID
+                _make_export_success(markdown),  # EXPORT_MARKDOWN_FROM_DOC
+                _make_doc_blocks(),  # GET_DOC_BLOCKS
+            ]
+        )
         with patch("monday_cli.commands.docs.get_client", return_value=mock_client):
             return runner.invoke(
                 app,
@@ -171,13 +175,15 @@ class TestDefaultJsonExportSucceeds:
         Expected call sequence: GET_ITEM_BY_ID, GET_BOARD_COLUMNS, GET_DOC_BY_OBJECT_ID,
         EXPORT_MARKDOWN_FROM_DOC, GET_DOC_BLOCKS — 5 execute_query calls total.
         """
-        mock_client = _build_mock_client([
-            _make_item(),
-            _make_board_columns(),
-            _make_doc_by_object_id(),
-            _make_export_success(),
-            _make_doc_blocks(),
-        ])
+        mock_client = _build_mock_client(
+            [
+                _make_item(),
+                _make_board_columns(),
+                _make_doc_by_object_id(),
+                _make_export_success(),
+                _make_doc_blocks(),
+            ]
+        )
         with patch("monday_cli.commands.docs.get_client", return_value=mock_client):
             result = runner.invoke(
                 app,
@@ -193,17 +199,20 @@ class TestDefaultJsonExportSucceeds:
 # Test: Default JSON shape — export unsupported (AC2, AC3 lossless)
 # ---------------------------------------------------------------------------
 
+
 class TestDefaultJsonExportUnsupported:
     """Default path when Markdown export is unsupported."""
 
     def _invoke(self):
-        mock_client = _build_mock_client([
-            _make_item(),
-            _make_board_columns(),
-            _make_doc_by_object_id(),
-            _make_export_failure(),
-            _make_doc_blocks(),
-        ])
+        mock_client = _build_mock_client(
+            [
+                _make_item(),
+                _make_board_columns(),
+                _make_doc_by_object_id(),
+                _make_export_failure(),
+                _make_doc_blocks(),
+            ]
+        )
         with patch("monday_cli.commands.docs.get_client", return_value=mock_client):
             return runner.invoke(
                 app,
@@ -233,7 +242,7 @@ class TestDefaultJsonExportUnsupported:
         assert len(data["blocks"]) > 0
 
     def test_no_json_fallback_shape(self):
-        """The old fallback emitted the raw docs[0] object; new shape is always {markdown, blocks}."""
+        """The old fallback emitted raw docs[0]; new shape is always {markdown, blocks}."""
         result = self._invoke()
         data = json.loads(result.stdout)
         # Must have exactly these two keys at the top level (may have more in blocks)
@@ -244,19 +253,22 @@ class TestDefaultJsonExportUnsupported:
 # Test: --raw success (AC5)
 # ---------------------------------------------------------------------------
 
+
 class TestRawFlagSuccess:
     """--raw / --markdown flag with a successful Markdown export."""
 
     _markdown_text = "# Raw Document\n\nSome content here."
 
     def _invoke(self, flag: str = "--raw"):
-        mock_client = _build_mock_client([
-            _make_item(),
-            _make_board_columns(),
-            _make_doc_by_object_id(),
-            _make_export_success(self._markdown_text),
-            # GET_DOC_BLOCKS should NOT be called in raw mode
-        ])
+        mock_client = _build_mock_client(
+            [
+                _make_item(),
+                _make_board_columns(),
+                _make_doc_by_object_id(),
+                _make_export_success(self._markdown_text),
+                # GET_DOC_BLOCKS should NOT be called in raw mode
+            ]
+        )
         with patch("monday_cli.commands.docs.get_client", return_value=mock_client):
             return runner.invoke(
                 app,
@@ -275,7 +287,7 @@ class TestRawFlagSuccess:
             json.loads(result.stdout)
 
     def test_raw_stdout_equals_markdown(self):
-        """stdout content matches the exported Markdown exactly (plus trailing newline from echo)."""
+        """stdout content matches the exported Markdown exactly (plus trailing newline)."""
         result = self._invoke("--raw")
         assert self._markdown_text in result.stdout
 
@@ -292,19 +304,21 @@ class TestRawFlagSuccess:
 
     def test_raw_does_not_fetch_blocks(self):
         """In --raw mode, GET_DOC_BLOCKS must NOT be called (blocks not needed)."""
-        mock_client = _build_mock_client([
-            _make_item(),
-            _make_board_columns(),
-            _make_doc_by_object_id(),
-            _make_export_success(self._markdown_text),
-        ])
+        mock_client = _build_mock_client(
+            [
+                _make_item(),
+                _make_board_columns(),
+                _make_doc_by_object_id(),
+                _make_export_success(self._markdown_text),
+            ]
+        )
         with patch("monday_cli.commands.docs.get_client", return_value=mock_client):
             result = runner.invoke(
                 app,
                 ["docs", "get", "--item-id", "1001", "--column-name", "Notes", "--raw"],
             )
         assert result.exit_code == 0
-        # Only 4 calls: GET_ITEM_BY_ID, GET_BOARD_COLUMNS, GET_DOC_BY_OBJECT_ID, EXPORT_MARKDOWN_FROM_DOC
+        # Only 4 calls: GET_ITEM_BY_ID, GET_BOARD_COLUMNS, GET_DOC_BY_OBJECT_ID, EXPORT_MARKDOWN
         assert mock_client.execute_query.call_count == 4
 
 
@@ -312,17 +326,20 @@ class TestRawFlagSuccess:
 # Test: --raw with unsupported export (AC6)
 # ---------------------------------------------------------------------------
 
+
 class TestRawFlagUnsupportedExport:
     """--raw when Markdown export is unsupported: error on stderr, non-zero exit."""
 
     def _invoke(self, flag: str = "--raw"):
-        mock_client = _build_mock_client([
-            _make_item(),
-            _make_board_columns(),
-            _make_doc_by_object_id(),
-            _make_export_failure("Export not supported for this document type"),
-            # GET_DOC_BLOCKS must NOT be called in --raw mode
-        ])
+        mock_client = _build_mock_client(
+            [
+                _make_item(),
+                _make_board_columns(),
+                _make_doc_by_object_id(),
+                _make_export_failure("Export not supported for this document type"),
+                # GET_DOC_BLOCKS must NOT be called in --raw mode
+            ]
+        )
         with patch("monday_cli.commands.docs.get_client", return_value=mock_client):
             return runner.invoke(
                 app,
@@ -358,25 +375,28 @@ class TestRawFlagUnsupportedExport:
 
     def test_does_not_fetch_blocks(self):
         """In --raw mode, GET_DOC_BLOCKS must NOT be called even on failure."""
-        mock_client = _build_mock_client([
-            _make_item(),
-            _make_board_columns(),
-            _make_doc_by_object_id(),
-            _make_export_failure(),
-        ])
+        mock_client = _build_mock_client(
+            [
+                _make_item(),
+                _make_board_columns(),
+                _make_doc_by_object_id(),
+                _make_export_failure(),
+            ]
+        )
         with patch("monday_cli.commands.docs.get_client", return_value=mock_client):
             result = runner.invoke(
                 app,
                 ["docs", "get", "--item-id", "1001", "--column-name", "Notes", "--raw"],
             )
         assert result.exit_code != 0
-        # Only 4 calls: GET_ITEM_BY_ID, GET_BOARD_COLUMNS, GET_DOC_BY_OBJECT_ID, EXPORT_MARKDOWN_FROM_DOC
+        # Only 4 calls: GET_ITEM_BY_ID, GET_BOARD_COLUMNS, GET_DOC_BY_OBJECT_ID, EXPORT_MARKDOWN
         assert mock_client.execute_query.call_count == 4
 
 
 # ---------------------------------------------------------------------------
 # Test: Empty/absent doc keeps existing non-zero exit
 # ---------------------------------------------------------------------------
+
 
 class TestEmptyOrAbsentDoc:
     """Existing not-found behaviour is preserved."""
@@ -400,10 +420,12 @@ class TestEmptyOrAbsentDoc:
                 }
             ]
         }
-        mock_client = _build_mock_client([
-            item_no_doc,
-            _make_board_columns(),
-        ])
+        mock_client = _build_mock_client(
+            [
+                item_no_doc,
+                _make_board_columns(),
+            ]
+        )
         with patch("monday_cli.commands.docs.get_client", return_value=mock_client):
             result = runner.invoke(
                 app,
@@ -413,13 +435,15 @@ class TestEmptyOrAbsentDoc:
 
     def test_blocks_query_returns_no_docs_exits_nonzero(self):
         """When GET_DOC_BLOCKS returns no docs, exit non-zero."""
-        mock_client = _build_mock_client([
-            _make_item(),
-            _make_board_columns(),
-            _make_doc_by_object_id(),
-            _make_export_failure(),  # export fails
-            _make_no_docs(),          # and blocks also empty
-        ])
+        mock_client = _build_mock_client(
+            [
+                _make_item(),
+                _make_board_columns(),
+                _make_doc_by_object_id(),
+                _make_export_failure(),  # export fails
+                _make_no_docs(),  # and blocks also empty
+            ]
+        )
         with patch("monday_cli.commands.docs.get_client", return_value=mock_client):
             result = runner.invoke(
                 app,
@@ -429,9 +453,11 @@ class TestEmptyOrAbsentDoc:
 
     def test_item_not_found_exits_nonzero(self):
         """When the item doesn't exist, exit non-zero."""
-        mock_client = _build_mock_client([
-            {"items": []},  # GET_ITEM_BY_ID returns nothing
-        ])
+        mock_client = _build_mock_client(
+            [
+                {"items": []},  # GET_ITEM_BY_ID returns nothing
+            ]
+        )
         with patch("monday_cli.commands.docs.get_client", return_value=mock_client):
             result = runner.invoke(
                 app,

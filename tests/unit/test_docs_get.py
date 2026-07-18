@@ -163,6 +163,31 @@ class TestDefaultJsonExportSucceeds:
         # The markdown content lives inside the JSON envelope
         assert data["markdown"] is not None
 
+    def test_both_api_calls_made(self):
+        """Default success path must call BOTH EXPORT_MARKDOWN_FROM_DOC and GET_DOC_BLOCKS.
+
+        This locks in the intentional two-API-call design so a future change can't
+        silently drop the blocks fetch and still pass the other assertions.
+        Expected call sequence: GET_ITEM_BY_ID, GET_BOARD_COLUMNS, GET_DOC_BY_OBJECT_ID,
+        EXPORT_MARKDOWN_FROM_DOC, GET_DOC_BLOCKS — 5 execute_query calls total.
+        """
+        mock_client = _build_mock_client([
+            _make_item(),
+            _make_board_columns(),
+            _make_doc_by_object_id(),
+            _make_export_success(),
+            _make_doc_blocks(),
+        ])
+        with patch("monday_cli.commands.docs.get_client", return_value=mock_client):
+            result = runner.invoke(
+                app,
+                ["docs", "get", "--item-id", "1001", "--column-name", "Notes"],
+            )
+        assert result.exit_code == 0
+        # Exactly 5 calls: GET_ITEM_BY_ID, GET_BOARD_COLUMNS, GET_DOC_BY_OBJECT_ID,
+        # EXPORT_MARKDOWN_FROM_DOC, GET_DOC_BLOCKS
+        assert mock_client.execute_query.call_count == 5
+
 
 # ---------------------------------------------------------------------------
 # Test: Default JSON shape — export unsupported (AC2, AC3 lossless)
@@ -309,11 +334,15 @@ class TestRawFlagUnsupportedExport:
         assert result.exit_code != 0
 
     def test_error_goes_to_stderr(self):
-        """Error message must appear on stderr, not stdout."""
+        """Error message must appear on stderr, not stdout.
+
+        Specifically: the failure message must be in result.stderr, and
+        result.stdout must be completely empty (no JSON fallback, no bare text).
+        """
         result = self._invoke("--raw")
-        # stderr should contain something about the failure
-        assert result.stderr or result.output  # at minimum, something was written
-        # stdout should be empty (no JSON fallback)
+        # The error message must land on stderr
+        assert "Error" in result.stderr
+        # stdout must be completely empty — no fallback output
         assert result.stdout.strip() == ""
 
     def test_no_json_on_stdout(self):

@@ -11,25 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > **breaking change** that justifies at least a **minor version bump** pre-1.0
 > (i.e. 0.5.0 → 0.6.0). Please confirm the version number before tagging a release.
 
-### BREAKING CHANGE
-
-- **`monday docs get` default output changed from Markdown to JSON.**
-  The command now emits a deterministic, lossless JSON object
-  `{"markdown": <string|null>, "blocks": [...]}` on stdout by default, parseable by
-  any downstream tool without special-casing.
-  - **Migration path:** users who relied on the previous bare-Markdown default output
-    should add `--raw` (or the alias `--markdown`) to their invocations:
-    ```bash
-    # Before (0.5.x and earlier)
-    monday docs get --item-id 123 --column-name "Notes"
-    # After (0.6.0+) — same Markdown output on stdout
-    monday docs get --item-id 123 --column-name "Notes" --raw
-    ```
-  - The silent Markdown-vs-JSON shape switch (depending on whether Markdown export
-    was supported by the document) has been removed. The new default is always a
-    single JSON object regardless of export support (`markdown` key is `null` when
-    export is unavailable, `blocks` key is always populated).
-
 ### Added
 
 - `monday docs get --raw` / `--markdown` flag: prints rendered Markdown directly to
@@ -39,11 +20,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `monday docs get` default output is now a deterministic JSON object
-  `{"markdown": <str|null>, "blocks": [...]}` emitted via `print_json()`.
+- **BREAKING:** `monday docs get` default output changed from bare Markdown to a
+  deterministic, lossless JSON object `{"markdown": <string|null>, "blocks": [...]}`.
   Both keys are always present: `markdown` is the rendered Markdown string when export
   succeeds, or `null` when unsupported; `blocks` is always the raw block JSON so the
-  payload is lossless even without Markdown export support.
+  payload is lossless even without Markdown export support. The previous silent
+  Markdown-vs-JSON shape switch (depending on whether Markdown export was supported by
+  the document) has been removed.
+  - **Migration path:** users who relied on the previous bare-Markdown default output
+    should add `--raw` (or the alias `--markdown`) to their invocations:
+    ```bash
+    # Before (0.5.x and earlier)
+    monday docs get --item-id 123 --column-name "Notes"
+    # After (0.6.0+) — same Markdown output on stdout
+    monday docs get --item-id 123 --column-name "Notes" --raw
+    ```
 
 ## [0.5.0] - 2026-02-17
 

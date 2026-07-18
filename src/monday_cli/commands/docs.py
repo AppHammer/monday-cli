@@ -162,7 +162,8 @@ def get_doc(
                     err=True,
                 )
                 raise typer.Exit(1)
-            typer.echo(export.get("markdown", ""))
+            # Guard against success:true but markdown:null — emit empty string, not "None"
+            typer.echo(export.get("markdown") or "")
         else:
             # Default path: emit deterministic, lossless JSON {markdown, blocks}
             markdown_value = export.get("markdown") if export_success else None

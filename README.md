@@ -516,9 +516,10 @@ monday docs get --item-id <ITEM_ID> --column-name <COLUMN_NAME> [OPTIONS]
 Options:
   -i, --item-id TEXT      Item ID (required)
   -n, --column-name TEXT  Doc column name (required)
-  --raw / --markdown      Print rendered Markdown to stdout (human opt-out of the default JSON).
-                          '--raw' is canonical; '--markdown' is an alias.
-                          Errors if Markdown export is unavailable.
+  --raw, --markdown       Aliases for the same flag. Print rendered Markdown to stdout
+                          (human opt-out of the default JSON). '--raw' is the canonical
+                          spelling; '--markdown' is a discoverable alias — both produce
+                          identical output. Errors if Markdown export is unavailable.
 ```
 
 Returns a lossless JSON object with two keys:

@@ -76,14 +76,12 @@ def test_created_item_leaves_no_residue_after_forced_failure() -> None:
 
     Relies on running immediately after `test_created_item_teardown_runs_on_
     forced_failure` in file order (no test-randomization plugin is installed
-    in this project). A single bounded-size listing is enough to prove
-    absence: the item was created moments ago by the previous test, so if
-    teardown ran it will not appear anywhere in a fresh listing.
+    in this project). Uses `--all` to paginate the full board regardless of
+    its size, so the absence check can't produce a false negative just
+    because the item happens to fall past a bounded page.
     """
     assert _residue_state, "Prior test did not run or did not populate shared state"
-    output = run_cli(
-        "items", "list", "--board-id", _residue_state["board_id"], "--limit", "500", raw=True
-    )
+    output = run_cli("items", "list", "--board-id", _residue_state["board_id"], "--all", raw=True)
     assert _residue_state["item_id"] not in output
 
 

@@ -144,3 +144,12 @@ mutation DeleteItem($itemId: ID!) {
   }
 }
 """
+
+# Clear a column value (used to detach a corrupted / dangling doc reference)
+CLEAR_ITEM_COLUMN_VALUE = """
+mutation ClearItemColumnValue($boardId: ID!, $itemId: ID!, $columnId: String!) {
+  clear_item_column_value(board_id: $boardId, item_id: $itemId, column_id: $columnId) {
+    id
+  }
+}
+"""

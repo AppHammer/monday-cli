@@ -54,6 +54,7 @@ class CommandModel:
 
     name: str
     help: str | None
+    short_help: str | None = None
     params: list[ParamModel] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -61,6 +62,7 @@ class CommandModel:
         return {
             "name": self.name,
             "help": self.help,
+            "short_help": self.short_help,
             "params": [p.to_dict() for p in self.params],
         }
 
@@ -139,8 +141,22 @@ def _is_help_flag(param: Any) -> bool:
 
 
 def _command_help(command: Any) -> str | None:
-    """Best-effort help string for a command."""
+    """Best-effort full help string for a command (used for the JSON tree)."""
     return _clean_help(getattr(command, "help", None) or getattr(command, "short_help", None))
+
+
+def _command_short_help(command: Any) -> str | None:
+    """First paragraph of a command's help, collapsed to one line.
+
+    Used for the prose command listing, where embedding the full (often
+    multi-paragraph) docstring produces noisy, very long one-liners. The full
+    help text is still preserved via :func:`_command_help` for the JSON tree.
+    """
+    raw = getattr(command, "help", None)
+    if not raw:
+        return _clean_help(getattr(command, "short_help", None))
+    first_paragraph = raw.strip().split("\n\n", 1)[0]
+    return _clean_help(first_paragraph)
 
 
 _JSON_PRIMITIVE_TYPES = (str, int, float, bool)
@@ -181,7 +197,12 @@ def _build_param(param: Any) -> ParamModel:
 def _build_command(name: str, command: Any) -> CommandModel:
     """Convert a Click command into a CommandModel."""
     params = [_build_param(p) for p in getattr(command, "params", []) if not _is_help_flag(p)]
-    return CommandModel(name=name, help=_command_help(command), params=params)
+    return CommandModel(
+        name=name,
+        help=_command_help(command),
+        short_help=_command_short_help(command),
+        params=params,
+    )
 
 
 def _build_group(name: str, group: Any) -> GroupModel:

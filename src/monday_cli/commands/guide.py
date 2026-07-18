@@ -110,7 +110,8 @@ Workflow 3 — page through every item on a board as JSON:
 def _format_command(prefix: str, command: CommandModel) -> str:
     """Render one command line with its help and options for the listing."""
     lines: list[str] = []
-    help_text = f" — {command.help}" if command.help else ""
+    short_help = command.short_help or command.help
+    help_text = f" — {short_help}" if short_help else ""
     lines.append(f"  {prefix} {command.name}{help_text}".rstrip())
     for param in command.params:
         if param.kind == "option":

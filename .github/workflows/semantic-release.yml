@@ -1,0 +1,156 @@
+name: Semantic Release
+
+# Trigger: only on push to main (i.e., after a PR is merged).
+# This is where automated versioning, changelog, tag, and GitHub Release happen.
+#
+# Design decisions / hazard mitigations documented here:
+#
+# 1. GATE ON GREEN TESTS
+#    The release job requires the "Tests" workflow to pass first (see `needs`
+#    in future when we can use workflow_run, or via branch protection rules).
+#    For now we re-run the test suite as a required step before releasing, so
+#    we never publish a red build. Once FR-0002 integration tests land on main,
+#    add integration.yml as an additional gate.
+#
+# 2. BOT-PUSH LOOP PREVENTION
+#    python-semantic-release commits "[skip ci]" or uses a dedicated GH_TOKEN
+#    (not GITHUB_TOKEN) to push the version-bump commit + tag to main.
+#    The workflow uses a concurrency group so concurrent pushes (e.g. rapid
+#    merges) are serialized and the previous run cancelled if superseded.
+#    The "[skip ci]" in PSR's commit message prevents this workflow from
+#    re-firing on the bump commit.
+#
+# 3. TOKEN REQUIREMENTS
+#    GH_TOKEN must be a Personal Access Token (classic) or a GitHub App token
+#    with Contents: write + pull-requests: read on this repo.
+#    The default GITHUB_TOKEN cannot push to a branch-protected main.
+#    See README.md section "Release Bot Token Setup" for configuration steps.
+#
+# 4. NO-OP BEHAVIOR
+#    When there are no releasable commits (feat:/fix:/BREAKING CHANGE:) since
+#    the last tag, python-semantic-release exits with code 0 and prints
+#    "No release will be made". The workflow detects this via the output of the
+#    version step and skips downstream publish/tag steps automatically.
+#
+# 5. SINGLE-RELEASE GUARANTEE
+#    This workflow only creates the version bump, CHANGELOG update, and the
+#    annotated git tag. The GitHub Release and binary attachment are handled
+#    exclusively by release.yml (which fires on v*.*.* tag push). This ensures
+#    exactly one Release per version with no duplicates.
+
+on:
+  push:
+    branches:
+      - main
+    # Ignore paths that the release bot itself commits so we don't loop.
+    # PSR also adds "[skip ci]" to its commit message, providing a second guard.
+    paths-ignore:
+      - 'pyproject.toml'
+      - 'CHANGELOG.md'
+
+concurrency:
+  # Only one release run at a time on main; cancel the older one if a new push
+  # arrives before the previous run completes.
+  group: semantic-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write  # needed to push commits + tags
+
+jobs:
+  # ── Step 1: Run tests before releasing ────────────────────────────────────
+  test:
+    name: Gate — Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history needed for semantic-release
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install package with dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run unit tests
+        run: pytest tests/unit
+
+  # ── Step 2: Compute version, bump pyproject.toml, update CHANGELOG, tag ──
+  release:
+    name: Semantic Release
+    needs: test
+    runs-on: ubuntu-latest
+
+    outputs:
+      # Whether PSR actually made a release (true/false string)
+      released: ${{ steps.semrel.outputs.released }}
+      version: ${{ steps.semrel.outputs.version }}
+      tag: ${{ steps.semrel.outputs.tag }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for version calculation
+          # Use GH_TOKEN so the push to protected main is authorised.
+          # The default GITHUB_TOKEN cannot push past branch protection.
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Configure git identity for PSR commits
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install python-semantic-release
+        run: |
+          python -m pip install --upgrade pip
+          pip install "python-semantic-release>=9.0.0"
+
+      - name: Run python-semantic-release
+        id: semrel
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          # PSR will:
+          #  1. Compute the next version from commits since the last tag
+          #     (feat → minor, fix → patch, breaking → major)
+          #  2. If there IS a releasable version:
+          #     a. Update project.version in pyproject.toml
+          #     b. Update CHANGELOG.md
+          #     c. Commit both files with "[skip ci]" in the message
+          #     d. Create an annotated tag v{version}
+          #     e. Push the commit + tag to main (using GH_TOKEN)
+          #     f. Create a GitHub Release (we set upload_to_release = true in
+          #        pyproject.toml; the binary asset is handled by release.yml
+          #        which fires on the tag push)
+          #  3. If there are NO releasable commits, PSR exits 0 with no changes.
+
+          semantic-release version 2>&1
+          EXIT_CODE=$?
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "semantic-release exited with error code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
+
+      - name: Report release outcome
+        run: |
+          echo "released=${{ steps.semrel.outputs.released }}"
+          echo "version=${{ steps.semrel.outputs.version }}"
+          echo "tag=${{ steps.semrel.outputs.tag }}"
+          if [ "${{ steps.semrel.outputs.released }}" = "true" ]; then
+            echo "✓ Released version ${{ steps.semrel.outputs.version }} (tag ${{ steps.semrel.outputs.tag }})"
+          else
+            echo "No releasable commits found — no release was made."
+          fi

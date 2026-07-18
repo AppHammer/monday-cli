@@ -663,6 +663,7 @@ monday --debug items get --item-id 1234567890
 |----------|-------------|---------|
 | `MONDAY_API_TOKEN` | Monday.com API token (required) | - |
 | `MONDAY_API_URL` | Monday.com API endpoint | https://api.monday.com/v2 |
+| `MONDAY_TEST_BOARD_ID` | Board id used by the live integration suite (`tests/integration`) | 18422673411 |
 | `LOG_LEVEL` | Logging level | INFO |
 | `RETRY_MAX_ATTEMPTS` | Maximum retry attempts | 3 |
 | `RETRY_BACKOFF_FACTOR` | Retry backoff multiplier | 2.0 |
@@ -688,8 +689,36 @@ monday --debug items get --item-id 1234567890
 ### Run Tests
 
 ```bash
-pytest
+pytest                       # full suite (unit + collectible integration)
+pytest tests/unit            # fast, offline unit tests only
 ```
+
+#### Live integration tests
+
+`tests/integration/` exercises the CLI end-to-end against the **live Monday.com
+API and the dedicated scratch test board `18422673411`**. They are marked with
+the `integration` marker and are safe to re-run: every artifact they create is
+run-scoped and torn down automatically, even on failure.
+
+```bash
+# Requires a token; targets the test board by default.
+export MONDAY_API_TOKEN="your_api_token_here"
+pytest tests/integration -m integration
+```
+
+- When `MONDAY_API_TOKEN` is unset, the suite **skips cleanly** (no failures).
+- The board is pinned to `18422673411` and can be overridden with
+  `MONDAY_TEST_BOARD_ID`. As a safety rail the harness **hard-fails** if the
+  board ever resolves to the project-management board `18422673287` — never run
+  destructive tests against it.
+
+**CI:** `.github/workflows/integration.yml` runs this suite on every pull
+request, serialized through a single concurrency group so overlapping PRs queue
+instead of colliding on the shared board. It is gated on the `MONDAY_API_TOKEN`
+**repository secret** — forked PRs (which cannot read secrets) are skipped and
+never fail, and same-repo runs without the secret exit cleanly. Configure the
+secret under **Settings → Secrets and variables → Actions**; optionally set a
+`MONDAY_TEST_BOARD_ID` repository variable to override the default board.
 
 ### Code Quality
 

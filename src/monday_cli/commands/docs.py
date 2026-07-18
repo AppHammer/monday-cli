@@ -94,11 +94,28 @@ def _resolve_doc_internal_id(client, object_id: str) -> Optional[str]:
 def get_doc(
     item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item containing the doc column"),
     column_name: Optional[str] = typer.Option(None, "--column-name", "-n", help="Name of the doc column"),
+    raw: bool = typer.Option(
+        False,
+        "--raw",
+        "--markdown",
+        help=(
+            "Print rendered Markdown as-is (human opt-out of the default JSON). "
+            "'--raw' is canonical; '--markdown' is an alias. Errors if Markdown export is unavailable."
+        ),
+    ),
 ) -> None:
-    """Get document content as Markdown.
+    """Get document content as a deterministic JSON object {markdown, blocks} by default.
+
+    The default output is a lossless JSON object with two keys:
+    - markdown: rendered Markdown string, or null if Markdown export is unsupported
+    - blocks: raw block JSON (always populated for documents with content)
+
+    Use --raw (or --markdown) to print rendered Markdown directly to stdout instead.
+    When Markdown export is unavailable, --raw errors loudly and exits non-zero.
 
     Example:
         monday docs get --item-id 1234567890 --column-name "Monday Doc"
+        monday docs get --item-id 1234567890 --column-name "Monday Doc" --raw
     """
     try:
         if item_id is None:
@@ -130,19 +147,38 @@ def get_doc(
             )
             raise typer.Exit(1)
 
-        result = client.execute_query(EXPORT_MARKDOWN_FROM_DOC, {"docId": int(internal_id)})
-        export = result.get("export_markdown_from_doc", {})
+        # Always attempt Markdown export
+        export_result = client.execute_query(EXPORT_MARKDOWN_FROM_DOC, {"docId": int(internal_id)})
+        export = export_result.get("export_markdown_from_doc", {})
+        export_success = bool(export.get("success"))
 
-        if export.get("success"):
-            typer.echo(export.get("markdown", ""))
+        if raw:
+            # --raw / --markdown: print rendered Markdown for humans; error loudly if unsupported
+            if not export_success:
+                error_detail = export.get("error", "Markdown export is not supported for this document.")
+                typer.secho(
+                    f"Error: Markdown export unavailable — {error_detail}",
+                    fg=typer.colors.RED,
+                    err=True,
+                )
+                raise typer.Exit(1)
+            # Guard against success:true but markdown:null — emit empty string, not "None"
+            typer.echo(export.get("markdown") or "")
         else:
-            # Markdown export not supported — fall back to block JSON
+            # Default path: emit deterministic, lossless JSON {markdown, blocks}
+            markdown_value = export.get("markdown") if export_success else None
+
+            # Always fetch blocks for lossless output
             doc_result = client.execute_query(GET_DOC_BLOCKS, {"docIds": [internal_id]})
             docs = doc_result.get("docs", [])
             if not docs:
-                typer.secho(f"No content found for document {internal_id}", fg=typer.colors.YELLOW)
+                typer.secho(
+                    f"No content found for document {internal_id}",
+                    fg=typer.colors.YELLOW,
+                )
                 raise typer.Exit(1)
-            print_json(docs[0])
+            blocks = docs[0].get("blocks", [])
+            print_json({"markdown": markdown_value, "blocks": blocks})
 
     except typer.Exit:
         raise

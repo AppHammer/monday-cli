@@ -1,13 +1,19 @@
 """Commands for managing Monday.com items."""
 
 import json
+from typing import Any
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
 from monday_cli.cli import get_client, items_app
-from monday_cli.client.mutations import CHANGE_COLUMN_VALUE, CREATE_ITEM, DELETE_ITEM
+from monday_cli.client.mutations import (
+    CHANGE_COLUMN_VALUE,
+    CREATE_ITEM,
+    DELETE_ITEM,
+    MOVE_ITEM_TO_GROUP,
+)
 from monday_cli.client.queries import (
     GET_BOARD_COLUMNS,
     GET_BOARD_ITEMS,
@@ -16,6 +22,12 @@ from monday_cli.client.queries import (
 )
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
 from monday_cli.utils.output import print_json
+from monday_cli.utils.resolve import (
+    fetch_board_groups,
+    format_groups_for_error,
+    get_status_columns,
+    resolve_group_ref,
+)
 
 
 @items_app.command("get")
@@ -77,7 +89,12 @@ def create_item(
         None, "--board-id", "-b", help="ID of the board to create item on"
     ),
     item_name: str | None = typer.Option(None, "--name", "-n", help="Name of the new item"),
-    group_id: str | None = typer.Option(None, "--group-id", "-g", help="Group ID (optional)"),
+    group: str | None = typer.Option(
+        None, "--group", "-g", help="Group title OR id (auto-detected; optional)"
+    ),
+    group_id: str | None = typer.Option(
+        None, "--group-id", help="Group id (id-only, long option; optional)"
+    ),
     column_values: str | None = typer.Option(
         None,
         "--column-values",
@@ -87,8 +104,16 @@ def create_item(
 ) -> None:
     """Create a new item on a board.
 
+    Place the item in a group with -g/--group (accepts a group TITLE or id,
+    auto-detected) or --group-id (id-only). The two are mutually exclusive;
+    -g means the same "title or id" across items list / create / move.
+
     Example:
         monday items create --board-id 1234567890 --name "New Task"
+
+        monday items create --board-id 1234567890 --name "New Task" --group "Topics"
+
+        monday items create --board-id 1234567890 --name "New Task" -g "topics"
 
         monday items create --board-id 1234567890 --name "New Task" --group-id "topics"
 
@@ -118,7 +143,38 @@ def create_item(
             )
             raise typer.Exit(1)
 
+        if group and group_id:
+            typer.secho(
+                "Error: Cannot use both --group and --group-id together. Choose one.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+
         client = get_client()
+
+        # Resolve the destination group id.
+        #   --group-id : id-only, used as-is (no resolution).
+        #   -g/--group : title OR id, auto-detected via the shared resolver
+        #                (widened from id-only in v0.6.3; ids still work).
+        resolved_group_id = group_id
+        if group:
+            resolved_group, groups = resolve_group_ref(client, str(board_id), group)
+            if resolved_group is None:
+                typer.secho(
+                    f"Error: No group matching '{group}' on board {board_id}",
+                    fg=typer.colors.RED,
+                )
+                typer.secho(
+                    f"Available groups: {format_groups_for_error(groups)}",
+                    fg=typer.colors.YELLOW,
+                )
+                typer.secho(
+                    "Example: monday items create --board-id "
+                    f'{board_id} --name "New Task" --group "Topics"',
+                    fg=typer.colors.BLUE,
+                )
+                raise typer.Exit(1)
+            resolved_group_id = resolved_group["id"]
 
         # Parse column values if provided
         column_values_dict = None
@@ -139,8 +195,8 @@ def create_item(
             "columnValues": column_values_str,
         }
 
-        if group_id:
-            variables["groupId"] = group_id
+        if resolved_group_id:
+            variables["groupId"] = resolved_group_id
 
         result = client.execute_mutation(CREATE_ITEM, variables)
         created_item = result.get("create_item")
@@ -152,6 +208,8 @@ def create_item(
             typer.secho("Error: Failed to create item", fg=typer.colors.RED)
             raise typer.Exit(1)
 
+    except typer.Exit:
+        raise
     except AuthenticationError:
         typer.secho(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
@@ -493,10 +551,18 @@ def list_items(
         None, "--cursor", "-c", help="Pagination cursor for next page"
     ),
     group: str | None = typer.Option(
-        None, "--group", "-g", help="Filter by group title (case-insensitive)"
+        None, "--group", "-g", help="Filter by group TITLE or id (auto-detected)"
     ),
     group_id: str | None = typer.Option(
-        None, "--group-id", help="Filter by group ID (exact match)"
+        None, "--group-id", help="Filter by group id (id-only, exact match)"
+    ),
+    status: str | None = typer.Option(
+        None, "--status", "-s", help="Filter by status label (case-insensitive)"
+    ),
+    status_column: str | None = typer.Option(
+        None,
+        "--status-column",
+        help="Which status column to filter on (required when a board has more than one)",
     ),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
 ) -> None:
@@ -508,8 +574,16 @@ def list_items(
     Returns items with pagination support. By default, returns the first 100 items.
     Use --cursor to get the next page, or --all to fetch all items automatically.
 
-    Filter by group using --group (matches group title, case-insensitive) or
-    --group-id (matches exact group ID). Use 'monday groups list' to see available groups.
+    Filter by group using -g/--group (accepts a group TITLE or id, auto-detected)
+    or --group-id (id-only, exact match). Passing a group id to -g returns exactly
+    what --group-id with the same id returns. An unknown group is a teaching error
+    (exit 1); a valid-but-empty group returns items: [] (exit 0).
+
+    Filter by status with --status "<label>" (case-insensitive). If the board has
+    more than one status column you must name it with --status-column "<title>"
+    (otherwise a teaching error lists the choices). --status composes with the
+    group filter as a logical AND. Use 'monday groups list' / 'monday statuses
+    list' to see available groups and status labels.
 
     Column values are included by default for complete data export.
 
@@ -524,9 +598,17 @@ def list_items(
 
         monday items list --board-id 1234567890 --group "Topics"
 
+        monday items list --board-id 1234567890 --group "topics"
+
         monday items list --board-id 1234567890 --group-id "topics"
 
         monday items list --board-id 1234567890 --group "Topics" --all
+
+        monday items list --board-id 1234567890 --status "Done"
+
+        monday items list --board-id 1234567890 --status "High" --status-column "Priority"
+
+        monday items list --board-id 1234567890 --status "Done" --group "In Progress" --all
 
         monday items list --board-id 1234567890 \
             --cursor "MSw5NzI4MDA5MDAsaV9YcmxJb0p1VEdYc1VWeGlxeF9kLDg4MiwzNXw0MTQ1NzU1MTE5"
@@ -645,47 +727,121 @@ def list_items(
                     )
                     break
 
-        # Apply group filtering if specified (client-side filtering)
-        if group or group_id:
-            original_count = len(all_items)
-
-            if group_id:
-                # Exact match on group ID
-                all_items = [
-                    item
-                    for item in all_items
-                    if item.get("group") and item["group"].get("id") == group_id
-                ]
-            else:  # group filter (title)
-                # Case-insensitive match on group title
-                # group is guaranteed non-None here: we're in `if group or group_id`
-                # and group_id is falsy, so group must be truthy.
-                group_lower = (group or "").lower()
-                all_items = [
-                    item
-                    for item in all_items
-                    if item.get("group") and item["group"].get("title", "").lower() == group_lower
-                ]
-
-            filtered_count = len(all_items)
-            if filtered_count == 0:
+        # Apply group filtering if specified (client-side, after pagination).
+        #   --group-id : id-only, exact match, no resolution.
+        #   -g/--group : title OR id, resolved via the shared resolver so that
+        #     `-g <id>` filters on the SAME group.id path as `--group-id <id>`.
+        # Empty vs unknown are distinguishable: an unknown -g value is a teaching
+        # error (exit 1); a valid-but-empty group falls through to items: [] (exit 0).
+        if group_id:
+            all_items = [
+                item
+                for item in all_items
+                if item.get("group") and item["group"].get("id") == group_id
+            ]
+        elif group:
+            resolved_group, groups = resolve_group_ref(client, str(final_board_id), group)
+            if resolved_group is None:
                 typer.secho(
-                    f"No items found in group '{group or group_id}' on board {final_board_id}",
+                    f"Error: No group matching '{group}' on board {final_board_id}",
+                    fg=typer.colors.RED,
+                )
+                typer.secho(
+                    f"Available groups: {format_groups_for_error(groups)}",
                     fg=typer.colors.YELLOW,
                 )
                 typer.secho(
-                    f"Tip: Use 'monday groups list {final_board_id}' to see available groups",
+                    f'Example: monday items list --board-id {final_board_id} --group "Topics"',
                     fg=typer.colors.BLUE,
                 )
-                raise typer.Exit(0)
+                raise typer.Exit(1)
+            resolved_group_id = resolved_group["id"]
+            all_items = [
+                item
+                for item in all_items
+                if item.get("group") and item["group"].get("id") == resolved_group_id
+            ]
 
-            # Show filter info when fetching multiple pages
-            if all_pages and original_count != filtered_count:
-                group_label = group or group_id
-                typer.secho(
-                    f"Filtered {original_count} items to {filtered_count} in group '{group_label}'",
-                    fg=typer.colors.GREEN,
+        # Apply status filtering if specified (client-side, composes with the
+        # group filter above as a logical AND). Resolves which status column to
+        # target and validates the label against that column only (C1-C4).
+        resolved_status_column_title: str | None = None
+        if status:
+            status_columns = get_status_columns(client, str(final_board_id))
+
+            chosen_column: dict[str, Any] | None
+            if status_column:
+                chosen_column = next(
+                    (c for c in status_columns if c["title"].lower() == status_column.lower()),
+                    None,
                 )
+                if chosen_column is None:
+                    valid = ", ".join(f"'{c['title']}'" for c in status_columns) or "(none)"
+                    typer.secho(
+                        f"Error: '{status_column}' is not a status column on "
+                        f"board {final_board_id}",
+                        fg=typer.colors.RED,
+                    )
+                    typer.secho(f"Available status columns: {valid}", fg=typer.colors.YELLOW)
+                    typer.secho(
+                        f"Example: monday items list --board-id {final_board_id} "
+                        f'--status "Done" --status-column "Status"',
+                        fg=typer.colors.BLUE,
+                    )
+                    raise typer.Exit(1)
+            elif len(status_columns) == 1:
+                chosen_column = status_columns[0]
+            elif len(status_columns) == 0:
+                typer.secho(
+                    f"Error: Board {final_board_id} has no status columns to filter on.",
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(1)
+            else:
+                titles = ", ".join(f"'{c['title']}'" for c in status_columns)
+                typer.secho(
+                    f"Error: Board {final_board_id} has multiple status columns; "
+                    "specify which one with --status-column.",
+                    fg=typer.colors.RED,
+                )
+                typer.secho(f"Status columns: {titles}", fg=typer.colors.YELLOW)
+                typer.secho(
+                    f"Example: monday items list --board-id {final_board_id} "
+                    f'--status "{status}" --status-column "{status_columns[0]["title"]}"',
+                    fg=typer.colors.BLUE,
+                )
+                raise typer.Exit(1)
+
+            # Validate the label against the chosen column's labels only.
+            labels = chosen_column["labels"]
+            status_lower = status.lower()
+            if not any((label or "").lower() == status_lower for label in labels.values()):
+                available = ", ".join(f"'{label}'" for label in labels.values()) or "(none)"
+                typer.secho(
+                    f"Error: Status '{status}' not found in column " f"'{chosen_column['title']}'",
+                    fg=typer.colors.RED,
+                )
+                typer.secho(f"Available statuses: {available}", fg=typer.colors.YELLOW)
+                typer.secho(
+                    f"Example: monday items list --board-id {final_board_id} "
+                    f'--status "{next(iter(labels.values()), "Done")}" '
+                    f'--status-column "{chosen_column["title"]}"',
+                    fg=typer.colors.BLUE,
+                )
+                raise typer.Exit(1)
+
+            resolved_status_column_title = chosen_column["title"]
+            column_id = chosen_column["id"]
+
+            def _matches_status(item: dict[str, Any]) -> bool:
+                for cv in item.get("column_values", []):
+                    if cv.get("id") == column_id:
+                        text = cv.get("text") or ""
+                        # Unset status (blank text) is excluded from a positive match.
+                        return text.strip() != "" and text.lower() == status_lower
+                return False
+
+            all_items = [item for item in all_items if _matches_status(item)]
 
         # Format output
         if table:
@@ -702,13 +858,14 @@ def list_items(
             rich_table.add_column("Name", style="green")
             rich_table.add_column("State", style="yellow")
             rich_table.add_column("Group", style="blue")
+            rich_table.add_column("Group ID", style="blue", no_wrap=True)
             rich_table.add_column("Creator", style="magenta")
             rich_table.add_column("Created", style="dim")
 
             for item in all_items:
-                group_title = (
-                    item.get("group", {}).get("title", "N/A") if item.get("group") else "N/A"
-                )
+                item_group = item.get("group") or {}
+                group_title = item_group.get("title", "N/A") or "N/A"
+                group_id_cell = item_group.get("id", "N/A") or "N/A"
                 creator_name = (
                     item.get("creator", {}).get("name", "N/A") if item.get("creator") else "N/A"
                 )
@@ -722,6 +879,7 @@ def list_items(
                     item.get("name", ""),
                     item.get("state", ""),
                     group_title,
+                    group_id_cell,
                     creator_name,
                     created_at,
                 )
@@ -762,13 +920,194 @@ def list_items(
                     "items_count": len(all_items),
                 }
 
-            # Add filter metadata if used
+            # Add filter metadata if used (reflects ALL active filters).
             if group:
                 output["group_filter"] = group
             if group_id:
                 output["group_id_filter"] = group_id
+            if status:
+                output["status_filter"] = status
+                output["status_column"] = resolved_status_column_title
 
             print_json(output)
+
+    except typer.Exit:
+        raise
+    except AuthenticationError:
+        typer.secho(
+            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    except RateLimitError as e:
+        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    except MondayAPIError as e:
+        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    except Exception as e:
+        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+
+@items_app.command("move")
+def move_item(
+    item_id: int | None = typer.Option(None, "--item-id", "-i", help="ID of the item to move"),
+    group: str | None = typer.Option(
+        None, "--group", "-g", help="Destination group TITLE or id (auto-detected)"
+    ),
+    group_id: str | None = typer.Option(
+        None, "--group-id", help="Destination group id (id-only, long option)"
+    ),
+) -> None:
+    """Move an item to another group on its own board.
+
+    Resolve the destination with -g/--group (accepts a group TITLE or id,
+    auto-detected — same rule as items list / create) or --group-id (id-only).
+    The two are mutually exclusive. The group is resolved against the item's
+    OWN board. Moving an item to the group it is already in is a safe no-op
+    (exit 0, same JSON shape). Subitems cannot be moved this way.
+
+    Example:
+        monday items move --item-id 1234567890 --group-id group_abc
+
+        monday items move --item-id 1234567890 --group "In Progress"
+
+        monday items move --item-id 1234567890 -g topics
+    """
+    try:
+        if item_id is None:
+            typer.secho("Error: Item ID is required. Use --item-id", fg=typer.colors.RED)
+            typer.secho(
+                'Example: monday items move --item-id 1234567890 --group "In Progress"',
+                fg=typer.colors.BLUE,
+            )
+            raise typer.Exit(1)
+
+        if group and group_id:
+            typer.secho(
+                "Error: Cannot use both --group and --group-id together. Choose one.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+
+        if not group and not group_id:
+            typer.secho(
+                "Error: A destination group is required. Use --group or --group-id",
+                fg=typer.colors.RED,
+            )
+            typer.secho(
+                'Example: monday items move --item-id 1234567890 --group "In Progress"',
+                fg=typer.colors.BLUE,
+            )
+            raise typer.Exit(1)
+
+        client = get_client()
+
+        # Fetch the item to learn its board and current group.
+        result = client.execute_query(GET_ITEM_BY_ID, {"itemIds": [str(item_id)]})
+        items = result.get("items", [])
+        if not items:
+            typer.secho(f"Item {item_id} not found", fg=typer.colors.YELLOW)
+            raise typer.Exit(1)
+
+        item = items[0]
+        board = item.get("board") or {}
+        board_id = board.get("id")
+        board_name = board.get("name", "") or ""
+
+        if not board_id:
+            typer.secho("Error: Could not determine board for item", fg=typer.colors.RED)
+            raise typer.Exit(1)
+
+        # Reject subitems — moving a subitem between groups is out of scope.
+        if "subitems of" in board_name.lower():
+            typer.secho(
+                f"Error: Item {item_id} is a subitem; moving subitems between "
+                "groups is not supported.",
+                fg=typer.colors.RED,
+            )
+            typer.secho(
+                "Only main items on a regular board can be moved with 'items move'.",
+                fg=typer.colors.YELLOW,
+            )
+            raise typer.Exit(1)
+
+        # Resolve the destination group on the item's own board.
+        if group_id:
+            resolved_group_id = group_id
+        else:
+            resolved_group, groups = resolve_group_ref(client, str(board_id), group or "")
+            if resolved_group is None:
+                typer.secho(
+                    f"Error: No group matching '{group}' on board {board_id}",
+                    fg=typer.colors.RED,
+                )
+                typer.secho(
+                    f"Available groups: {format_groups_for_error(groups)}",
+                    fg=typer.colors.YELLOW,
+                )
+                typer.secho(
+                    f'Example: monday items move --item-id {item_id} --group "In Progress"',
+                    fg=typer.colors.BLUE,
+                )
+                raise typer.Exit(1)
+            resolved_group_id = resolved_group["id"]
+
+        # A4 — idempotent no-op: already in the target group.
+        current_group = item.get("group") or {}
+        if current_group.get("id") == resolved_group_id:
+            typer.secho(
+                f"✓ Item {item_id} is already in group '{current_group.get('title')}' "
+                f"({resolved_group_id}); no move needed.",
+                fg=typer.colors.GREEN,
+            )
+            print_json(
+                {
+                    "id": str(item.get("id")),
+                    "name": item.get("name"),
+                    "group": current_group,
+                    "board": {"id": str(board_id), "name": board_name},
+                    "moved": False,
+                }
+            )
+            return
+
+        # Perform the move.
+        try:
+            move_result = client.execute_mutation(
+                MOVE_ITEM_TO_GROUP,
+                {"itemId": str(item_id), "groupId": resolved_group_id},
+            )
+        except MondayAPIError as e:
+            groups = fetch_board_groups(client, str(board_id))
+            typer.secho(f"API Error: could not move item {item_id}: {str(e)}", fg=typer.colors.RED)
+            typer.secho(
+                f"Available groups on board {board_id}: {format_groups_for_error(groups)}",
+                fg=typer.colors.YELLOW,
+            )
+            raise typer.Exit(1)
+
+        moved = move_result.get("move_item_to_group")
+        if not moved:
+            typer.secho(f"Error: Failed to move item {item_id}", fg=typer.colors.RED)
+            raise typer.Exit(1)
+
+        moved_group = moved.get("group") or {}
+        typer.secho(
+            f"✓ Item {item_id} moved to group '{moved_group.get('title')}' "
+            f"({moved_group.get('id')})",
+            fg=typer.colors.GREEN,
+        )
+        print_json(
+            {
+                "id": str(moved.get("id")),
+                "name": moved.get("name"),
+                "group": moved_group,
+                "board": moved.get("board") or {"id": str(board_id), "name": board_name},
+                "moved": True,
+            }
+        )
 
     except typer.Exit:
         raise

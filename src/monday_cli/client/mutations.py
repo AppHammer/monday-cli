@@ -134,6 +134,24 @@ mutation DeleteGroup($boardId: ID!, $groupId: String!) {
 }
 """
 
+# Move an item to another group on its own board
+MOVE_ITEM_TO_GROUP = """
+mutation MoveItemToGroup($itemId: ID!, $groupId: String!) {
+  move_item_to_group(item_id: $itemId, group_id: $groupId) {
+    id
+    name
+    group {
+      id
+      title
+    }
+    board {
+      id
+      name
+    }
+  }
+}
+"""
+
 # Delete item (works for both items and subitems)
 DELETE_ITEM = """
 mutation DeleteItem($itemId: ID!) {

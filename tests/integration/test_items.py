@@ -189,10 +189,64 @@ def test_group_filtering_returns_only_matching_group(
 
 
 @pytest.mark.integration
-def test_list_table_output_renders_without_error(test_board_id: str) -> None:
-    output = run_cli("items", "list", "--board-id", test_board_id, "--table", raw=True)
+def test_g_by_id_equals_group_id_and_title_path(
+    created_group: Callable[..., str], created_item: Callable[..., str], test_board_id: str
+) -> None:
+    """FR-0009 B1: `-g <id>` == `--group-id <id>`, and `-g <title>` matches too."""
+    group_a = created_group("g-parity-a")
+    group_b = created_group("g-parity-b")
+    item_a = created_item("parity-a", group_id=group_a)
+    created_item("parity-b", group_id=group_b)
 
+    common = ["items", "list", "--board-id", test_board_id, "--all", "--limit", "500"]
+
+    by_group_id = run_cli(*common, "--group-id", group_a)
+    by_g_id = run_cli(*common, "-g", group_a)
+
+    ids_group_id = sorted(str(i["id"]) for i in by_group_id["items"])
+    ids_g_id = sorted(str(i["id"]) for i in by_g_id["items"])
+    assert ids_group_id == ids_g_id == [item_a]
+
+    # Title path resolves to the same group.
+    title_a = run_cli("items", "get", "--item-id", item_a)["group"]["title"]
+    by_g_title = run_cli(*common, "-g", title_a)
+    assert sorted(str(i["id"]) for i in by_g_title["items"]) == [item_a]
+
+
+@pytest.mark.integration
+def test_unknown_group_is_teaching_error(test_board_id: str) -> None:
+    """FR-0009 B2: an unknown `-g` value exits non-zero and lists groups."""
+    output = run_cli(
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "-g",
+        "definitely-not-a-real-group-xyz",
+        expect_error=True,
+    )
+    assert "Available groups" in output
+
+
+@pytest.mark.integration
+def test_list_table_output_renders_group_id(
+    created_group: Callable[..., str], created_item: Callable[..., str], test_board_id: str
+) -> None:
+    """FR-0009 D2: `--table` renders the group id, and JSON carries group{id,title}."""
+    group = created_group("table-groupid")
+    item_id = created_item("table-item", group_id=group)
+
+    output = run_cli("items", "list", "--board-id", test_board_id, "--table", raw=True)
     assert output.strip() != ""
+    assert group in output  # the group id token appears in the table
+
+    # D1: every listed item carries group{id,title}; the created one matches.
+    data = run_cli("items", "list", "--board-id", test_board_id, "--all", "--limit", "500")
+    for item in data["items"]:
+        if item.get("group") is not None:
+            assert "id" in item["group"] and "title" in item["group"]
+    match = [i for i in data["items"] if str(i["id"]) == item_id]
+    assert match and match[0]["group"]["id"] == group
 
 
 @pytest.mark.integration
@@ -212,13 +266,13 @@ def test_delete_removes_item_and_list_confirms_removal(
     assert delete_data.get("item_id") == item_id
     assert delete_data.get("deleted") is True
 
-    # With the group now empty, `items list --group-id` exits 0 (not an
-    # error) but prints a "no items found" message with no JSON payload --
-    # read stdout raw rather than parsing it.
-    list_output = run_cli(
-        "items", "list", "--board-id", test_board_id, "--group-id", group_id, raw=True
-    )
-    assert "No items found" in list_output
+    # With the group now empty, `items list --group-id` exits 0 and returns a
+    # JSON payload with an empty `items` list (a valid-but-empty group is
+    # distinguishable from an unknown group after FR-0009 Epic B).
+    list_data = run_cli("items", "list", "--board-id", test_board_id, "--group-id", group_id)
+    assert isinstance(list_data, dict)
+    assert list_data["items"] == []
+    assert list_data.get("group_id_filter") == group_id
 
     # Idempotent re-delete must not raise -- confirms teardown safety.
     run_cli("items", "delete", "--item-id", item_id, "--force", expect_error=True)

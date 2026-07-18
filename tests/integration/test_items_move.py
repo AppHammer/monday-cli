@@ -1,0 +1,70 @@
+"""FR-0009 Epic A (#59): `monday items move` live integration tests.
+
+Runs the move command end-to-end against the scratch test board
+(18422673411 — never the PM board; the shared harness hard-fails on it).
+Every group/item is created via the run-scoped factory fixtures and torn down
+even on assertion failure. Skips cleanly when MONDAY_API_TOKEN is unset.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+import pytest
+
+from tests.integration.helpers import run_cli
+
+
+@pytest.mark.integration
+def test_move_between_groups_by_id_then_back_by_title(
+    created_group: Callable[..., str], created_item: Callable[..., str], test_board_id: str
+) -> None:
+    group_a = created_group("move-a")
+    group_b = created_group("move-b")
+    item_id = created_item("mover", group_id=group_a)
+
+    # Move A -> B by id.
+    moved = run_cli("items", "move", "--item-id", item_id, "--group-id", group_b)
+    assert moved["group"]["id"] == group_b
+    assert moved["moved"] is True
+
+    # Confirm via items get.
+    assert run_cli("items", "get", "--item-id", item_id)["group"]["id"] == group_b
+
+    # Move back to A by title.
+    title_a = next(
+        g["title"]
+        for g in run_cli("groups", "list", "--board-id", test_board_id)["groups"]
+        if g["id"] == group_a
+    )
+    back = run_cli("items", "move", "--item-id", item_id, "--group", title_a)
+    assert back["group"]["id"] == group_a
+
+
+@pytest.mark.integration
+def test_move_noop_when_already_in_target(
+    created_group: Callable[..., str], created_item: Callable[..., str]
+) -> None:
+    group_a = created_group("noop-a")
+    item_id = created_item("noop-item", group_id=group_a)
+
+    result = run_cli("items", "move", "--item-id", item_id, "--group-id", group_a)
+    assert result["group"]["id"] == group_a
+    assert result["moved"] is False
+
+
+@pytest.mark.integration
+def test_move_unknown_group_is_teaching_error(
+    created_item: Callable[..., str],
+) -> None:
+    item_id = created_item("bad-move")
+    output = run_cli(
+        "items",
+        "move",
+        "--item-id",
+        item_id,
+        "-g",
+        "no-such-group-xyz",
+        expect_error=True,
+    )
+    assert "Available groups" in output

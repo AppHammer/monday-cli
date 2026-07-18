@@ -1,6 +1,53 @@
 # CHANGELOG
 
 
+## v0.6.3 — FR-0009 group- & status-aware item operations
+
+Group- and status-aware `items` operations. `-g` now means the same thing
+(group **title or id**, auto-detected) across `items list`, `items create`, and
+the new `items move`; `--group-id` stays id-only. All work is client-side and
+composes with pagination.
+
+### Added
+
+- **`monday items move`** — move an item to another group on its own board, by
+  group title or id. Adds a `MOVE_ITEM_TO_GROUP` mutation. Rejects subitems with
+  a teaching error; moving an item to the group it is already in is a safe no-op
+  (exit 0, same JSON shape). (Epic A, Closes #59)
+- **`items list --status "<label>"` / `--status-column "<title>"`** — client-side
+  status filtering (case-insensitive label match, same semantics as
+  `items update`). Boards with more than one status column require
+  `--status-column`; omitting it raises a teaching error listing the choices
+  (never guesses). `--status` composes with `--group`/`--group-id` as a logical
+  AND. JSON output gains `status_filter` + `status_column` metadata. (Epic C,
+  Closes #60)
+- **`items list --table`** now shows a dedicated `Group ID` column alongside the
+  group title (rows with no group render `N/A`); default JSON output is
+  unchanged. The `group { id title }` selection in `items list`/`items get` JSON
+  is regression-locked. (Epic D, Closes #56)
+
+### Changed
+
+- **`items create -g` widened from id-only to title-or-id.** `-g` now binds to
+  `--group` (a group **title or id**, auto-detected) instead of `--group-id`.
+  This is backward compatible — passing a group id to `-g` still works via
+  auto-detection — but is a deliberate behavior change so `-g` is consistent
+  across all `items` subcommands. `--group-id` remains available on `create` as
+  an id-only long option. (Epic B/B3, Closes #58)
+
+### Fixed
+
+- **`items list -g` now accepts a group id.** Previously `-g` matched group
+  *titles* only, so passing a `group_xxxx` id (or the default `topics` id)
+  silently matched nothing and printed "No items found". `-g <id>` now returns
+  exactly what `--group-id <same id>` returns. (Epic B, Closes #57)
+- **Unknown vs. empty group are now distinguishable on `items list`.** An
+  unknown `-g` value is a teaching error listing available groups as id + title
+  (exit 1); a valid-but-empty group returns JSON `items: []` with filter
+  metadata (exit 0). The old ambiguous "No items found" / exit 0 for the
+  valid-but-empty case is gone. (Epic B, Closes #57)
+
+
 ## Unreleased — FR-0006 quality baseline (no version bump: chore/ci only)
 
 ### Added

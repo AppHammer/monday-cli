@@ -41,7 +41,9 @@ def build() -> None:
         "--copy-metadata=monday-cli",
         # Optimize
         "--strip",  # Strip symbols (Linux)
-        "--optimize=2",  # Python optimization level
+        # -O (level 1) not -OO (level 2): level 2 strips docstrings, which
+        # Typer/Click derive command help from, leaving `monday guide` help blank.
+        "--optimize=1",  # Python optimization level (keep docstrings for help text)
         # Output directories
         f"--distpath={project_root / 'dist'}",
         f"--workpath={project_root / 'build' / 'temp'}",

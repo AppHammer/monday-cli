@@ -196,7 +196,11 @@ def _build_param(param: Any) -> ParamModel:
 
 def _build_command(name: str, command: Any) -> CommandModel:
     """Convert a Click command into a CommandModel."""
-    params = [_build_param(p) for p in getattr(command, "params", []) if not _is_help_flag(p)]
+    params = [
+        _build_param(p)
+        for p in getattr(command, "params", [])
+        if not _is_help_flag(p) and not getattr(p, "hidden", False)
+    ]
     return CommandModel(
         name=name,
         help=_command_help(command),
@@ -209,7 +213,10 @@ def _build_group(name: str, group: Any) -> GroupModel:
     """Convert a Click group into a GroupModel."""
     commands: list[CommandModel] = []
     for cmd_name in sorted(group.commands):
-        commands.append(_build_command(cmd_name, group.commands[cmd_name]))
+        member = group.commands[cmd_name]
+        if getattr(member, "hidden", False):
+            continue
+        commands.append(_build_command(cmd_name, member))
     return GroupModel(name=name, help=_command_help(group), commands=commands)
 
 
@@ -239,6 +246,8 @@ def build_app_model(app: typer.Typer | None = None) -> AppModel:
     members: dict[str, Any] = getattr(root, "commands", {}) or {}
     for name in sorted(members):
         member = members[name]
+        if getattr(member, "hidden", False):
+            continue
         if _is_group(member):
             groups.append(_build_group(name, member))
         else:

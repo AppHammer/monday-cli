@@ -123,7 +123,9 @@ def list_groups(
 def create_group(
     title: str = typer.Option(..., "--title", "-t", help="Title of the new group"),
     board_id: int = typer.Option(..., "--board-id", "-b", help="ID of the board"),
-    color: Optional[str] = typer.Option(None, "--color", "-c", help="Hex color code (e.g., #ff642e)"),
+    color: Optional[str] = typer.Option(
+        None, "--color", "-c", help="Hex color code (e.g., #ff642e)"
+    ),
 ) -> None:
     """Create a new group on a board.
 
@@ -315,9 +317,7 @@ def delete_group(
                 verify_boards = verify_result.get("boards", [])
                 if verify_boards:
                     verify_groups = verify_boards[0].get("groups", [])
-                    group_still_exists = any(
-                        g.get("id") == group_id for g in verify_groups
-                    )
+                    group_still_exists = any(g.get("id") == group_id for g in verify_groups)
 
                     if not group_still_exists:
                         # Group was deleted despite the error

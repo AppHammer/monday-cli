@@ -7,7 +7,13 @@ import typer
 
 from monday_cli.cli import docs_app, get_client
 from monday_cli.client.mutations import ADD_CONTENT_FROM_MARKDOWN, CREATE_DOC, DELETE_DOC_BLOCK
-from monday_cli.client.queries import EXPORT_MARKDOWN_FROM_DOC, GET_BOARD_COLUMNS, GET_DOC_BLOCKS, GET_DOC_BY_OBJECT_ID, GET_ITEM_BY_ID
+from monday_cli.client.queries import (
+    EXPORT_MARKDOWN_FROM_DOC,
+    GET_BOARD_COLUMNS,
+    GET_DOC_BLOCKS,
+    GET_DOC_BY_OBJECT_ID,
+    GET_ITEM_BY_ID,
+)
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
 from monday_cli.utils.output import print_json
 
@@ -92,8 +98,12 @@ def _resolve_doc_internal_id(client, object_id: str) -> Optional[str]:
 
 @docs_app.command("get")
 def get_doc(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item containing the doc column"),
-    column_name: Optional[str] = typer.Option(None, "--column-name", "-n", help="Name of the doc column"),
+    item_id: Optional[int] = typer.Option(
+        None, "--item-id", "-i", help="ID of the item containing the doc column"
+    ),
+    column_name: Optional[str] = typer.Option(
+        None, "--column-name", "-n", help="Name of the doc column"
+    ),
     raw: bool = typer.Option(
         False,
         "--raw",
@@ -155,7 +165,9 @@ def get_doc(
         if raw:
             # --raw / --markdown: print rendered Markdown for humans; error loudly if unsupported
             if not export_success:
-                error_detail = export.get("error", "Markdown export is not supported for this document.")
+                error_detail = export.get(
+                    "error", "Markdown export is not supported for this document."
+                )
                 typer.secho(
                     f"Error: Markdown export unavailable — {error_detail}",
                     fg=typer.colors.RED,
@@ -201,9 +213,15 @@ def get_doc(
 
 @docs_app.command("append")
 def append_doc(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item containing the doc column"),
-    column_name: Optional[str] = typer.Option(None, "--column-name", "-n", help="Name of the doc column"),
-    content: Optional[str] = typer.Option(None, "--content", "-c", help="Markdown content to append to the document"),
+    item_id: Optional[int] = typer.Option(
+        None, "--item-id", "-i", help="ID of the item containing the doc column"
+    ),
+    column_name: Optional[str] = typer.Option(
+        None, "--column-name", "-n", help="Name of the doc column"
+    ),
+    content: Optional[str] = typer.Option(
+        None, "--content", "-c", help="Markdown content to append to the document"
+    ),
 ) -> None:
     """Append Markdown content to a document.
 
@@ -308,9 +326,15 @@ def _delete_all_doc_blocks(client, internal_id: str) -> int:
 
 @docs_app.command("put")
 def put_doc(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item containing the doc column"),
-    column_name: Optional[str] = typer.Option(None, "--column-name", "-n", help="Name of the doc column"),
-    content: Optional[str] = typer.Option(None, "--content", "-c", help="Markdown content to write to the document"),
+    item_id: Optional[int] = typer.Option(
+        None, "--item-id", "-i", help="ID of the item containing the doc column"
+    ),
+    column_name: Optional[str] = typer.Option(
+        None, "--column-name", "-n", help="Name of the doc column"
+    ),
+    content: Optional[str] = typer.Option(
+        None, "--content", "-c", help="Markdown content to write to the document"
+    ),
 ) -> None:
     """Replace document content with Markdown.
 

@@ -109,7 +109,9 @@ def list_workspaces(
                     product_id = account_product.get("id", "")
                     product_kind = account_product.get("kind", "")
                     if product_id:
-                        account_product_info = f"{product_id} ({product_kind})" if product_kind else product_id
+                        account_product_info = (
+                            f"{product_id} ({product_kind})" if product_kind else product_id
+                        )
 
                 rich_table.add_row(
                     str(workspace.get("id", "")),

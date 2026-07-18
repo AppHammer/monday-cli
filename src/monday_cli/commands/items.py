@@ -21,7 +21,9 @@ from monday_cli.utils.output import print_json
 
 @items_app.command("get")
 def get_item(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item to retrieve"),
+    item_id: Optional[int] = typer.Option(
+        None, "--item-id", "-i", help="ID of the item to retrieve"
+    ),
 ) -> None:
     """Get all information for a specific item by ID.
 
@@ -74,7 +76,9 @@ def get_item(
 
 @items_app.command("create")
 def create_item(
-    board_id: Optional[int] = typer.Option(None, "--board-id", "-b", help="ID of the board to create item on"),
+    board_id: Optional[int] = typer.Option(
+        None, "--board-id", "-b", help="ID of the board to create item on"
+    ),
     item_name: Optional[str] = typer.Option(None, "--name", "-n", help="Name of the new item"),
     group_id: Optional[str] = typer.Option(None, "--group-id", "-g", help="Group ID (optional)"),
     column_values: Optional[str] = typer.Option(
@@ -99,7 +103,10 @@ def create_item(
                 "Error: Board ID is required. Use --board-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday items create --board-id 1234567890 --name \"New Task\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday items create --board-id 1234567890 --name "New Task"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         if item_name is None:
@@ -107,7 +114,10 @@ def create_item(
                 "Error: Item name is required. Use --name",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday items create --board-id 1234567890 --name \"New Task\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday items create --board-id 1234567890 --name "New Task"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         client = get_client()
@@ -164,7 +174,9 @@ def create_item(
 @items_app.command("update")
 def update_item(
     item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item"),
-    title: Optional[str] = typer.Option(None, "--title", "-t", help="Column title (e.g., 'Status', 'Github Issue Link')"),
+    title: Optional[str] = typer.Option(
+        None, "--title", "-t", help="Column title (e.g., 'Status', 'Github Issue Link')"
+    ),
     value: Optional[str] = typer.Option(None, "--value", "-v", help="Value to set"),
 ) -> None:
     """Update an item column value using human-readable column titles.
@@ -185,7 +197,10 @@ def update_item(
                 "Error: Item ID is required. Use --item-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday items update --item-id 1234567890 --title \"Status\" --value \"Done\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday items update --item-id 1234567890 --title "Status" --value "Done"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         if title is None:
@@ -193,7 +208,10 @@ def update_item(
                 "Error: Column title is required. Use --title",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday items update --item-id 1234567890 --title \"Status\" --value \"Done\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday items update --item-id 1234567890 --title "Status" --value "Done"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         if value is None:
@@ -201,7 +219,10 @@ def update_item(
                 "Error: Value is required. Use --value",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday items update --item-id 1234567890 --title \"Status\" --value \"Done\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday items update --item-id 1234567890 --title "Status" --value "Done"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         client = get_client()
@@ -224,10 +245,7 @@ def update_item(
         board_id = board["id"]
 
         # Get board columns to find the column by title
-        columns_result = client.execute_query(
-            GET_BOARD_COLUMNS,
-            {"boardIds": [board_id]}
-        )
+        columns_result = client.execute_query(GET_BOARD_COLUMNS, {"boardIds": [board_id]})
 
         boards = columns_result.get("boards", [])
         if not boards:
@@ -249,7 +267,7 @@ def update_item(
             available_titles = ", ".join(f"'{col['title']}'" for col in columns)
             typer.secho(
                 f"Error: Column with title '{title}' not found on board {board_id}",
-                fg=typer.colors.RED
+                fg=typer.colors.RED,
             )
             typer.secho(f"Available columns: {available_titles}", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
@@ -266,7 +284,7 @@ def update_item(
             if not settings_str:
                 typer.secho(
                     f"Error: Status column '{title}' has no status options configured",
-                    fg=typer.colors.RED
+                    fg=typer.colors.RED,
                 )
                 raise typer.Exit(1)
 
@@ -289,8 +307,7 @@ def update_item(
             if status_index is None:
                 available_labels = ", ".join(f"'{label}'" for label in labels.values())
                 typer.secho(
-                    f"Error: Status '{value}' not found in column '{title}'",
-                    fg=typer.colors.RED
+                    f"Error: Status '{value}' not found in column '{title}'", fg=typer.colors.RED
                 )
                 typer.secho(f"Available statuses: {available_labels}", fg=typer.colors.YELLOW)
                 raise typer.Exit(1)
@@ -341,8 +358,7 @@ def update_item(
 
         if updated_item:
             typer.secho(
-                f"✓ Item column '{title}' updated to '{value}' successfully!",
-                fg=typer.colors.GREEN
+                f"✓ Item column '{title}' updated to '{value}' successfully!", fg=typer.colors.GREEN
             )
             print_json(updated_item)
         else:
@@ -384,7 +400,9 @@ def list_columns(
                 "Error: Item ID is required. Use --item-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday items list-columns --item-id 1234567890", fg=typer.colors.BLUE)
+            typer.secho(
+                "Example: monday items list-columns --item-id 1234567890", fg=typer.colors.BLUE
+            )
             raise typer.Exit(1)
 
         client = get_client()
@@ -408,10 +426,7 @@ def list_columns(
         board_name = board["name"]
 
         # Get board columns with settings
-        columns_result = client.execute_query(
-            GET_BOARD_COLUMNS,
-            {"boardIds": [board_id]}
-        )
+        columns_result = client.execute_query(GET_BOARD_COLUMNS, {"boardIds": [board_id]})
 
         boards = columns_result.get("boards", [])
         if not boards:
@@ -424,11 +439,7 @@ def list_columns(
         # Format columns for easy consumption
         formatted_columns = []
         for col in columns:
-            column_info = {
-                "column_id": col["id"],
-                "title": col["title"],
-                "type": col["type"]
-            }
+            column_info = {"column_id": col["id"], "title": col["title"], "type": col["type"]}
 
             # Add status options for status columns
             if col.get("type") == "status" and col.get("settings_str"):
@@ -436,8 +447,7 @@ def list_columns(
                     settings = json.loads(col["settings_str"])
                     labels = settings.get("labels", {})
                     status_options = [
-                        {"index": int(idx), "label": label}
-                        for idx, label in labels.items()
+                        {"index": int(idx), "label": label} for idx, label in labels.items()
                     ]
                     status_options.sort(key=lambda x: x["index"])
                     column_info["status_options"] = status_options
@@ -451,7 +461,7 @@ def list_columns(
             "board_id": board_id,
             "board_name": board_name,
             "item_id": str(item_id),
-            "columns": formatted_columns
+            "columns": formatted_columns,
         }
 
         print_json(output)
@@ -476,12 +486,20 @@ def list_columns(
 @items_app.command("list")
 def list_items(
     board_id: Optional[int] = typer.Argument(None, help="ID of the board to list items from"),
-    board_id_opt: Optional[int] = typer.Option(None, "--board-id", "-b", help="ID of the board to list items from"),
+    board_id_opt: Optional[int] = typer.Option(
+        None, "--board-id", "-b", help="ID of the board to list items from"
+    ),
     limit: int = typer.Option(100, "--limit", "-l", help="Items per page (max 500)"),
     all_pages: bool = typer.Option(False, "--all", "-a", help="Fetch all items across all pages"),
-    cursor: Optional[str] = typer.Option(None, "--cursor", "-c", help="Pagination cursor for next page"),
-    group: Optional[str] = typer.Option(None, "--group", "-g", help="Filter by group title (case-insensitive)"),
-    group_id: Optional[str] = typer.Option(None, "--group-id", help="Filter by group ID (exact match)"),
+    cursor: Optional[str] = typer.Option(
+        None, "--cursor", "-c", help="Pagination cursor for next page"
+    ),
+    group: Optional[str] = typer.Option(
+        None, "--group", "-g", help="Filter by group title (case-insensitive)"
+    ),
+    group_id: Optional[str] = typer.Option(
+        None, "--group-id", help="Filter by group ID (exact match)"
+    ),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
 ) -> None:
     """List all items/tasks from a board.
@@ -634,14 +652,16 @@ def list_items(
             if group_id:
                 # Exact match on group ID
                 all_items = [
-                    item for item in all_items
+                    item
+                    for item in all_items
                     if item.get("group") and item["group"].get("id") == group_id
                 ]
             else:  # group filter (title)
                 # Case-insensitive match on group title
                 group_lower = group.lower()
                 all_items = [
-                    item for item in all_items
+                    item
+                    for item in all_items
                     if item.get("group") and item["group"].get("title", "").lower() == group_lower
                 ]
 
@@ -683,8 +703,12 @@ def list_items(
             rich_table.add_column("Created", style="dim")
 
             for item in all_items:
-                group_title = item.get("group", {}).get("title", "N/A") if item.get("group") else "N/A"
-                creator_name = item.get("creator", {}).get("name", "N/A") if item.get("creator") else "N/A"
+                group_title = (
+                    item.get("group", {}).get("title", "N/A") if item.get("group") else "N/A"
+                )
+                creator_name = (
+                    item.get("creator", {}).get("name", "N/A") if item.get("creator") else "N/A"
+                )
                 created_at = item.get("created_at", "N/A")
                 if created_at != "N/A" and "T" in created_at:
                     # Format to just date
@@ -703,10 +727,16 @@ def list_items(
 
             # Show summary info
             if all_pages:
-                typer.secho(f"\nTotal items: {len(all_items)} (fetched {pages_fetched} pages)", fg=typer.colors.BLUE)
+                typer.secho(
+                    f"\nTotal items: {len(all_items)} (fetched {pages_fetched} pages)",
+                    fg=typer.colors.BLUE,
+                )
             else:
                 if next_cursor:
-                    typer.secho(f"\nShowing {len(all_items)} items. Use --cursor to get next page or --all to fetch all items.", fg=typer.colors.BLUE)
+                    typer.secho(
+                        f"\nShowing {len(all_items)} items. Use --cursor to get next page or --all to fetch all items.",
+                        fg=typer.colors.BLUE,
+                    )
                 else:
                     typer.secho(f"\nTotal items: {len(all_items)}", fg=typer.colors.BLUE)
         else:
@@ -800,7 +830,7 @@ def delete_item(
         if not force:
             typer.secho(
                 f"WARNING: This will permanently delete item '{item_name}' (ID: {item_id}) from board '{board_name}'!",
-                fg=typer.colors.YELLOW
+                fg=typer.colors.YELLOW,
             )
             typer.secho("This action cannot be undone.", fg=typer.colors.RED)
             confirm_delete = typer.confirm("Are you sure you want to continue?")
@@ -815,8 +845,7 @@ def delete_item(
 
         if deleted_item:
             typer.secho(
-                f"✓ Item '{item_name}' (ID: {item_id}) deleted successfully!",
-                fg=typer.colors.GREEN
+                f"✓ Item '{item_name}' (ID: {item_id}) deleted successfully!", fg=typer.colors.GREEN
             )
             output = {
                 "item_id": str(item_id),
@@ -836,7 +865,7 @@ def delete_item(
                 # Item is gone, deletion succeeded
                 typer.secho(
                     f"✓ Item '{item_name}' (ID: {item_id}) deleted successfully!",
-                    fg=typer.colors.GREEN
+                    fg=typer.colors.GREEN,
                 )
                 output = {
                     "item_id": str(item_id),

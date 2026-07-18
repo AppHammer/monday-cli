@@ -31,8 +31,7 @@ def get_subitem(
     """
     if subitem_id is None:
         typer.secho(
-            "Error: --subitem-id is required\n"
-            "Usage: monday subitems get --subitem-id <id>",
+            "Error: --subitem-id is required\n" "Usage: monday subitems get --subitem-id <id>",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
@@ -67,11 +66,21 @@ def get_subitem(
 
 @subitems_app.command("list")
 def list_subitems(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the parent item to list subitems from"),
-    board_id: Optional[int] = typer.Option(None, "--board-id", "-b", help="ID of the subitems board to list from"),
-    limit: int = typer.Option(100, "--limit", "-l", help="Items per page (max 500, only used with --board-id)"),
-    all_pages: bool = typer.Option(False, "--all", "-a", help="Fetch all subitems across all pages (only used with --board-id)"),
-    cursor: Optional[str] = typer.Option(None, "--cursor", "-c", help="Pagination cursor for next page (only used with --board-id)"),
+    item_id: Optional[int] = typer.Option(
+        None, "--item-id", "-i", help="ID of the parent item to list subitems from"
+    ),
+    board_id: Optional[int] = typer.Option(
+        None, "--board-id", "-b", help="ID of the subitems board to list from"
+    ),
+    limit: int = typer.Option(
+        100, "--limit", "-l", help="Items per page (max 500, only used with --board-id)"
+    ),
+    all_pages: bool = typer.Option(
+        False, "--all", "-a", help="Fetch all subitems across all pages (only used with --board-id)"
+    ),
+    cursor: Optional[str] = typer.Option(
+        None, "--cursor", "-c", help="Pagination cursor for next page (only used with --board-id)"
+    ),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
 ) -> None:
     """List subitems from a parent item or board.
@@ -126,7 +135,9 @@ def list_subitems(
             subitems = item.get("subitems", [])
 
             if not subitems:
-                typer.secho(f"No subitems found for item {item_id} ({item_name})", fg=typer.colors.YELLOW)
+                typer.secho(
+                    f"No subitems found for item {item_id} ({item_name})", fg=typer.colors.YELLOW
+                )
                 raise typer.Exit(0)
 
             # Output as table or JSON
@@ -142,7 +153,11 @@ def list_subitems(
                 rich_table.add_column("Created", style="dim")
 
                 for subitem in subitems:
-                    creator_name = subitem.get("creator", {}).get("name", "N/A") if subitem.get("creator") else "N/A"
+                    creator_name = (
+                        subitem.get("creator", {}).get("name", "N/A")
+                        if subitem.get("creator")
+                        else "N/A"
+                    )
                     created_at = subitem.get("created_at", "N/A")
                     if created_at != "N/A" and "T" in created_at:
                         created_at = created_at.split("T")[0]
@@ -221,8 +236,7 @@ def list_subitems(
                     if item_id:
                         # Fetch subitems for this item
                         subitems_result = client.execute_query(
-                            GET_ITEM_SUBITEMS,
-                            {"itemIds": [item_id]}
+                            GET_ITEM_SUBITEMS, {"itemIds": [item_id]}
                         )
                         items_with_subitems = subitems_result.get("items", [])
                         if items_with_subitems:
@@ -291,7 +305,9 @@ def list_subitems(
                 if all_pages:
                     title += f" ({len(all_subitems)} total, {pages_fetched} pages)"
                 else:
-                    title += f" ({len(all_subitems)} subitems" + (", more available)" if next_cursor else ")")
+                    title += f" ({len(all_subitems)} subitems" + (
+                        ", more available)" if next_cursor else ")"
+                    )
 
                 rich_table = Table(title=title)
 
@@ -303,8 +319,16 @@ def list_subitems(
                 rich_table.add_column("Created", style="dim")
 
                 for subitem in all_subitems:
-                    group_title = subitem.get("group", {}).get("title", "N/A") if subitem.get("group") else "N/A"
-                    creator_name = subitem.get("creator", {}).get("name", "N/A") if subitem.get("creator") else "N/A"
+                    group_title = (
+                        subitem.get("group", {}).get("title", "N/A")
+                        if subitem.get("group")
+                        else "N/A"
+                    )
+                    creator_name = (
+                        subitem.get("creator", {}).get("name", "N/A")
+                        if subitem.get("creator")
+                        else "N/A"
+                    )
                     created_at = subitem.get("created_at", "N/A")
                     if created_at != "N/A" and "T" in created_at:
                         created_at = created_at.split("T")[0]
@@ -330,10 +354,16 @@ def list_subitems(
 
                 # Show summary info
                 if all_pages:
-                    typer.secho(f"\nTotal subitems: {len(all_subitems)} (fetched {pages_fetched} pages)", fg=typer.colors.BLUE)
+                    typer.secho(
+                        f"\nTotal subitems: {len(all_subitems)} (fetched {pages_fetched} pages)",
+                        fg=typer.colors.BLUE,
+                    )
                 else:
                     if next_cursor:
-                        typer.secho(f"\nShowing {len(all_subitems)} subitems. Use --cursor to get next page or --all to fetch all subitems.", fg=typer.colors.BLUE)
+                        typer.secho(
+                            f"\nShowing {len(all_subitems)} subitems. Use --cursor to get next page or --all to fetch all subitems.",
+                            fg=typer.colors.BLUE,
+                        )
                     else:
                         typer.secho(f"\nTotal subitems: {len(all_subitems)}", fg=typer.colors.BLUE)
             else:
@@ -376,8 +406,12 @@ def list_subitems(
 
 @subitems_app.command("create")
 def create_subitem(
-    parent_item_id: Optional[int] = typer.Option(None, "--parent-item-id", "-p", help="ID of the parent item"),
-    subitem_name: Optional[str] = typer.Option(None, "--name", "-n", help="Name of the new subitem"),
+    parent_item_id: Optional[int] = typer.Option(
+        None, "--parent-item-id", "-p", help="ID of the parent item"
+    ),
+    subitem_name: Optional[str] = typer.Option(
+        None, "--name", "-n", help="Name of the new subitem"
+    ),
     column_values: Optional[str] = typer.Option(
         None,
         "--column-values",
@@ -398,7 +432,10 @@ def create_subitem(
                 "Error: Parent item ID is required. Use --parent-item-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday subitems create --parent-item-id 1234567890 --name \"New Subtask\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday subitems create --parent-item-id 1234567890 --name "New Subtask"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         if subitem_name is None:
@@ -406,7 +443,10 @@ def create_subitem(
                 "Error: Subitem name is required. Use --name",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday subitems create --parent-item-id 1234567890 --name \"New Subtask\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday subitems create --parent-item-id 1234567890 --name "New Subtask"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         client = get_client()
@@ -475,7 +515,10 @@ def list_columns(
                 "Error: Subitem ID is required. Use --subitem-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday subitems list-columns --subitem-id 9999999999", fg=typer.colors.BLUE)
+            typer.secho(
+                "Example: monday subitems list-columns --subitem-id 9999999999",
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         client = get_client()
@@ -499,10 +542,7 @@ def list_columns(
         board_name = board["name"]
 
         # Get board columns with settings
-        columns_result = client.execute_query(
-            GET_BOARD_COLUMNS,
-            {"boardIds": [board_id]}
-        )
+        columns_result = client.execute_query(GET_BOARD_COLUMNS, {"boardIds": [board_id]})
 
         boards = columns_result.get("boards", [])
         if not boards:
@@ -515,11 +555,7 @@ def list_columns(
         # Format columns for easy consumption
         formatted_columns = []
         for col in columns:
-            column_info = {
-                "column_id": col["id"],
-                "title": col["title"],
-                "type": col["type"]
-            }
+            column_info = {"column_id": col["id"], "title": col["title"], "type": col["type"]}
 
             # Add status options for status columns
             if col.get("type") == "status" and col.get("settings_str"):
@@ -527,8 +563,7 @@ def list_columns(
                     settings = json.loads(col["settings_str"])
                     labels = settings.get("labels", {})
                     status_options = [
-                        {"index": int(idx), "label": label}
-                        for idx, label in labels.items()
+                        {"index": int(idx), "label": label} for idx, label in labels.items()
                     ]
                     status_options.sort(key=lambda x: x["index"])
                     column_info["status_options"] = status_options
@@ -542,7 +577,7 @@ def list_columns(
             "board_id": board_id,
             "board_name": board_name,
             "subitem_id": str(subitem_id),
-            "columns": formatted_columns
+            "columns": formatted_columns,
         }
 
         print_json(output)
@@ -582,7 +617,10 @@ def list_statuses(
                 "Error: Subitem ID is required. Use --subitem-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday subitems list-statuses --subitem-id 9999999999", fg=typer.colors.BLUE)
+            typer.secho(
+                "Example: monday subitems list-statuses --subitem-id 9999999999",
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         client = get_client()
@@ -606,10 +644,7 @@ def list_statuses(
         board_name = board["name"]
 
         # Get board columns with settings
-        columns_result = client.execute_query(
-            GET_BOARD_COLUMNS,
-            {"boardIds": [board_id]}
-        )
+        columns_result = client.execute_query(GET_BOARD_COLUMNS, {"boardIds": [board_id]})
 
         boards = columns_result.get("boards", [])
         if not boards:
@@ -628,28 +663,26 @@ def list_statuses(
                     labels = settings.get("labels", {})
 
                     status_options = [
-                        {
-                            "index": int(idx),
-                            "label": label
-                        }
-                        for idx, label in labels.items()
+                        {"index": int(idx), "label": label} for idx, label in labels.items()
                     ]
 
                     # Sort by index
                     status_options.sort(key=lambda x: x["index"])
 
-                    status_columns.append({
-                        "column_id": col["id"],
-                        "column_title": col["title"],
-                        "statuses": status_options
-                    })
+                    status_columns.append(
+                        {
+                            "column_id": col["id"],
+                            "column_title": col["title"],
+                            "statuses": status_options,
+                        }
+                    )
                 except (json.JSONDecodeError, AttributeError, ValueError):
                     continue
 
         if not status_columns:
             typer.secho(
                 f"No status columns found on board '{board_name}' (ID: {board_id})",
-                fg=typer.colors.YELLOW
+                fg=typer.colors.YELLOW,
             )
             raise typer.Exit(0)
 
@@ -658,7 +691,7 @@ def list_statuses(
             "board_id": board_id,
             "board_name": board_name,
             "subitem_id": str(subitem_id),
-            "status_columns": status_columns
+            "status_columns": status_columns,
         }
 
         print_json(output)
@@ -683,7 +716,9 @@ def list_statuses(
 @subitems_app.command("update")
 def update_subitem(
     subitem_id: Optional[int] = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem"),
-    title: Optional[str] = typer.Option(None, "--title", "-t", help="Column title (e.g., 'Status', 'Github Issue Link')"),
+    title: Optional[str] = typer.Option(
+        None, "--title", "-t", help="Column title (e.g., 'Status', 'Github Issue Link')"
+    ),
     value: Optional[str] = typer.Option(None, "--value", "-v", help="Value to set"),
 ) -> None:
     """Update a subitem column value using human-readable column titles.
@@ -704,7 +739,10 @@ def update_subitem(
                 "Error: Subitem ID is required. Use --subitem-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday subitems update --subitem-id 9999999999 --title \"Status\" --value \"Ready For Work\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday subitems update --subitem-id 9999999999 --title "Status" --value "Ready For Work"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         if title is None:
@@ -712,7 +750,10 @@ def update_subitem(
                 "Error: Column title is required. Use --title",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday subitems update --subitem-id 9999999999 --title \"Status\" --value \"Ready For Work\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday subitems update --subitem-id 9999999999 --title "Status" --value "Ready For Work"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         if value is None:
@@ -720,7 +761,10 @@ def update_subitem(
                 "Error: Value is required. Use --value",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday subitems update --subitem-id 9999999999 --title \"Status\" --value \"Ready For Work\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday subitems update --subitem-id 9999999999 --title "Status" --value "Ready For Work"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         client = get_client()
@@ -743,10 +787,7 @@ def update_subitem(
         board_id = board["id"]
 
         # Get board columns to find the column by title
-        columns_result = client.execute_query(
-            GET_BOARD_COLUMNS,
-            {"boardIds": [board_id]}
-        )
+        columns_result = client.execute_query(GET_BOARD_COLUMNS, {"boardIds": [board_id]})
 
         boards = columns_result.get("boards", [])
         if not boards:
@@ -768,7 +809,7 @@ def update_subitem(
             available_titles = ", ".join(f"'{col['title']}'" for col in columns)
             typer.secho(
                 f"Error: Column with title '{title}' not found on board {board_id}",
-                fg=typer.colors.RED
+                fg=typer.colors.RED,
             )
             typer.secho(f"Available columns: {available_titles}", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
@@ -785,7 +826,7 @@ def update_subitem(
             if not settings_str:
                 typer.secho(
                     f"Error: Status column '{title}' has no status options configured",
-                    fg=typer.colors.RED
+                    fg=typer.colors.RED,
                 )
                 raise typer.Exit(1)
 
@@ -808,8 +849,7 @@ def update_subitem(
             if status_index is None:
                 available_labels = ", ".join(f"'{label}'" for label in labels.values())
                 typer.secho(
-                    f"Error: Status '{value}' not found in column '{title}'",
-                    fg=typer.colors.RED
+                    f"Error: Status '{value}' not found in column '{title}'", fg=typer.colors.RED
                 )
                 typer.secho(f"Available statuses: {available_labels}", fg=typer.colors.YELLOW)
                 raise typer.Exit(1)
@@ -861,7 +901,7 @@ def update_subitem(
         if updated_subitem:
             typer.secho(
                 f"✓ Subitem column '{title}' updated to '{value}' successfully!",
-                fg=typer.colors.GREEN
+                fg=typer.colors.GREEN,
             )
             print_json(updated_subitem)
         else:
@@ -887,7 +927,9 @@ def update_subitem(
 
 @subitems_app.command("delete")
 def delete_subitem(
-    subitem_id: Optional[int] = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem to delete"),
+    subitem_id: Optional[int] = typer.Option(
+        None, "--subitem-id", "-s", help="ID of the subitem to delete"
+    ),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
 ) -> None:
     """Delete a subitem from Monday.com.
@@ -908,7 +950,9 @@ def delete_subitem(
                 "Error: Subitem ID is required. Use --subitem-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday subitems delete --subitem-id 9999999999", fg=typer.colors.BLUE)
+            typer.secho(
+                "Example: monday subitems delete --subitem-id 9999999999", fg=typer.colors.BLUE
+            )
             raise typer.Exit(1)
 
         client = get_client()
@@ -930,7 +974,7 @@ def delete_subitem(
         if not force:
             typer.secho(
                 f"WARNING: This will permanently delete subitem '{subitem_name}' (ID: {subitem_id}) from board '{board_name}'!",
-                fg=typer.colors.YELLOW
+                fg=typer.colors.YELLOW,
             )
             typer.secho("This action cannot be undone.", fg=typer.colors.RED)
             confirm_delete = typer.confirm("Are you sure you want to continue?")
@@ -946,7 +990,7 @@ def delete_subitem(
         if deleted_subitem:
             typer.secho(
                 f"✓ Subitem '{subitem_name}' (ID: {subitem_id}) deleted successfully!",
-                fg=typer.colors.GREEN
+                fg=typer.colors.GREEN,
             )
             output = {
                 "subitem_id": str(subitem_id),
@@ -966,7 +1010,7 @@ def delete_subitem(
                 # Subitem is gone, deletion succeeded
                 typer.secho(
                     f"✓ Subitem '{subitem_name}' (ID: {subitem_id}) deleted successfully!",
-                    fg=typer.colors.GREEN
+                    fg=typer.colors.GREEN,
                 )
                 output = {
                     "subitem_id": str(subitem_id),

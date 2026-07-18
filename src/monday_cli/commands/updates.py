@@ -63,7 +63,9 @@ def get_updates(
 
 @updates_app.command("create")
 def create_update(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item or subitem"),
+    item_id: Optional[int] = typer.Option(
+        None, "--item-id", "-i", help="ID of the item or subitem"
+    ),
     body: Optional[str] = typer.Option(None, "--body", "-b", help="Update text content"),
 ) -> None:
     """Create an update on an item or subitem.
@@ -81,7 +83,10 @@ def create_update(
                 "Error: Item ID is required. Use --item-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday updates create --item-id 1234567890 --body \"Work in progress\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday updates create --item-id 1234567890 --body "Work in progress"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         if body is None:
@@ -89,7 +94,10 @@ def create_update(
                 "Error: Body text is required. Use --body",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday updates create --item-id 1234567890 --body \"Work in progress\"", fg=typer.colors.BLUE)
+            typer.secho(
+                'Example: monday updates create --item-id 1234567890 --body "Work in progress"',
+                fg=typer.colors.BLUE,
+            )
             raise typer.Exit(1)
 
         client = get_client()

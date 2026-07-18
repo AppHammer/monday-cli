@@ -1,6 +1,5 @@
 """Main CLI application for Monday CLI."""
 
-
 import typer
 from pydantic import ValidationError
 
@@ -98,6 +97,7 @@ def main_callback(
 def version() -> None:
     """Show version information."""
     from monday_cli import __version__
+
     typer.echo(f"monday-cli version {__version__}")
 
 

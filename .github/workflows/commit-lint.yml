@@ -1,0 +1,80 @@
+name: Commit Lint
+
+# Validates that all commit messages in a PR conform to the Conventional Commits
+# specification (https://www.conventionalcommits.org/).
+#
+# Why commit-lint matters for this repo:
+#  python-semantic-release derives the next version from commit types:
+#    feat:            → minor bump  (0.x.0)
+#    fix: / perf:     → patch bump  (0.0.x)
+#    feat!: / BREAKING CHANGE: → major bump (x.0.0)
+#    chore:/ci:/docs: → no bump (non-releasing)
+#  Non-conforming messages are treated as non-releasing by PSR, so they silently
+#  skip version bumps — which can surprise contributors expecting a release.
+#  Enforcing the spec on PRs keeps the commit history clean before automation
+#  goes live.
+#
+# Tool choice: wagoid/commitlint-github-action
+#  This wraps @commitlint/config-conventional (Node-based) but requires NO
+#  Node setup by the maintainers — the action ships its own runtime.
+#  The alternative (a Python PSR-native parser) would require a custom script
+#  and wouldn't reuse any existing tooling. The Node action is the de facto
+#  standard for commit-lint in GitHub Actions and adds minimal overhead.
+#
+# PR title linting:
+#  When the repo uses squash-merge (recommended), GitHub uses the PR title as
+#  the squash commit subject. This check lints the PR title so the squash commit
+#  also conforms, regardless of the individual commit messages.
+#
+# commitlint config is in commitlint.config.js at the repo root.
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited        # Re-run when the PR title changes
+      - synchronize   # Re-run when new commits are pushed to the PR
+
+concurrency:
+  group: commit-lint-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  commit-lint:
+    name: Lint Commit Messages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so we can check all commits in the PR
+
+      - name: Lint commit messages (Conventional Commits)
+        uses: wagoid/commitlint-github-action@v6
+        with:
+          configFile: commitlint.config.js
+          # Lint the PR title as well (squash-merge target)
+          firstParent: false
+          failOnWarnings: false
+          helpURL: |
+            https://www.conventionalcommits.org/en/v1.0.0/#summary
+
+      - name: Lint PR title (squash-merge subject)
+        # Also validate the PR title independently so the squash commit conforms.
+        # We pipe the title into commitlint directly.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          echo "$PR_TITLE" | npx --yes commitlint --config commitlint.config.js || {
+            echo ""
+            echo "PR title must follow Conventional Commits format."
+            echo "Examples:"
+            echo "  feat: add pagination to items list"
+            echo "  fix: handle empty API response gracefully"
+            echo "  chore: update dependencies"
+            echo "  feat!: rename --item argument to --item-id (BREAKING CHANGE)"
+            echo ""
+            echo "See https://www.conventionalcommits.org/ for the full spec."
+            exit 1
+          }

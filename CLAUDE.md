@@ -57,9 +57,9 @@ pytest -m integration                    # only integration tests
 pytest tests/integration -m integration  # same, scoped to the folder
 MONDAY_TEST_BOARD_ID=<id> pytest -m integration  # override the test board (never the PM board)
 
-# Lint / format / type-check
+# Lint / format / type-check (enforced on every PR by .github/workflows/quality.yml)
 ruff check src tests
-black src tests
+black --check src tests
 mypy src            # strict mode is enabled
 
 # Build the standalone Linux binary -> dist/monday
@@ -166,6 +166,7 @@ merge to main → tests.yml (gate) → semantic-release.yml:
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `tests.yml` | push/PR | Unit tests (gate for release) |
+| `quality.yml` | push/PR | Lint & type-check gate (ruff + black --check + mypy) |
 | `commit-lint.yml` | PR | Enforces Conventional Commits |
 | `semantic-release.yml` | push to main | Version bump + tag + changelog |
 | `release.yml` | tag `v*.*.*` | Build + attach Linux binary |

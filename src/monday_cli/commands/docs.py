@@ -1,18 +1,27 @@
 """Commands for managing Monday.com documents."""
 
 import json
-from typing import Optional
+from typing import Any
 
 import typer
 
 from monday_cli.cli import docs_app, get_client
+from monday_cli.client.graphql_client import MondayGraphQLClient
 from monday_cli.client.mutations import ADD_CONTENT_FROM_MARKDOWN, CREATE_DOC, DELETE_DOC_BLOCK
-from monday_cli.client.queries import EXPORT_MARKDOWN_FROM_DOC, GET_BOARD_COLUMNS, GET_DOC_BLOCKS, GET_DOC_BY_OBJECT_ID, GET_ITEM_BY_ID
+from monday_cli.client.queries import (
+    EXPORT_MARKDOWN_FROM_DOC,
+    GET_BOARD_COLUMNS,
+    GET_DOC_BLOCKS,
+    GET_DOC_BY_OBJECT_ID,
+    GET_ITEM_BY_ID,
+)
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
 from monday_cli.utils.output import print_json
 
 
-def _resolve_doc_column(client, item_id: int, column_name: str):
+def _resolve_doc_column(
+    client: MondayGraphQLClient, item_id: int, column_name: str
+) -> tuple[dict[str, Any], str]:
     """Resolve item and doc column. Returns (item, column_id) or raises typer.Exit."""
     result = client.execute_query(GET_ITEM_BY_ID, {"itemIds": [str(item_id)]})
     items = result.get("items", [])
@@ -46,8 +55,9 @@ def _resolve_doc_column(client, item_id: int, column_name: str):
         raise typer.Exit(1)
 
     if target_column.get("type") != "doc":
+        col_type = target_column.get("type")
         typer.secho(
-            f"Error: Column '{column_name}' is not a doc column (type: {target_column.get('type')})",
+            f"Error: Column '{column_name}' is not a doc column (type: {col_type})",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
@@ -55,7 +65,7 @@ def _resolve_doc_column(client, item_id: int, column_name: str):
     return item, target_column["id"]
 
 
-def _get_existing_doc_object_id(item, column_id: str) -> Optional[str]:
+def _get_existing_doc_object_id(item: dict[str, Any], column_id: str) -> str | None:
     """Extract the doc object_id from an item's column values, or None.
 
     The objectId stored in the column value is the object_id in the docs API,
@@ -81,7 +91,7 @@ def _get_existing_doc_object_id(item, column_id: str) -> Optional[str]:
     return None
 
 
-def _resolve_doc_internal_id(client, object_id: str) -> Optional[str]:
+def _resolve_doc_internal_id(client: MondayGraphQLClient, object_id: str) -> str | None:
     """Resolve a doc object_id to its internal doc id via the docs API."""
     result = client.execute_query(GET_DOC_BY_OBJECT_ID, {"objectIds": [str(object_id)]})
     docs = result.get("docs", [])
@@ -92,15 +102,20 @@ def _resolve_doc_internal_id(client, object_id: str) -> Optional[str]:
 
 @docs_app.command("get")
 def get_doc(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item containing the doc column"),
-    column_name: Optional[str] = typer.Option(None, "--column-name", "-n", help="Name of the doc column"),
+    item_id: int | None = typer.Option(
+        None, "--item-id", "-i", help="ID of the item containing the doc column"
+    ),
+    column_name: str | None = typer.Option(
+        None, "--column-name", "-n", help="Name of the doc column"
+    ),
     raw: bool = typer.Option(
         False,
         "--raw",
         "--markdown",
         help=(
             "Print rendered Markdown as-is (human opt-out of the default JSON). "
-            "'--raw' is canonical; '--markdown' is an alias. Errors if Markdown export is unavailable."
+            "'--raw' is canonical; '--markdown' is an alias. "
+            "Errors if Markdown export is unavailable."
         ),
     ),
 ) -> None:
@@ -155,7 +170,9 @@ def get_doc(
         if raw:
             # --raw / --markdown: print rendered Markdown for humans; error loudly if unsupported
             if not export_success:
-                error_detail = export.get("error", "Markdown export is not supported for this document.")
+                error_detail = export.get(
+                    "error", "Markdown export is not supported for this document."
+                )
                 typer.secho(
                     f"Error: Markdown export unavailable — {error_detail}",
                     fg=typer.colors.RED,
@@ -201,9 +218,15 @@ def get_doc(
 
 @docs_app.command("append")
 def append_doc(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item containing the doc column"),
-    column_name: Optional[str] = typer.Option(None, "--column-name", "-n", help="Name of the doc column"),
-    content: Optional[str] = typer.Option(None, "--content", "-c", help="Markdown content to append to the document"),
+    item_id: int | None = typer.Option(
+        None, "--item-id", "-i", help="ID of the item containing the doc column"
+    ),
+    column_name: str | None = typer.Option(
+        None, "--column-name", "-n", help="Name of the doc column"
+    ),
+    content: str | None = typer.Option(
+        None, "--content", "-c", help="Markdown content to append to the document"
+    ),
 ) -> None:
     """Append Markdown content to a document.
 
@@ -285,7 +308,7 @@ def append_doc(
         raise typer.Exit(1)
 
 
-def _delete_all_doc_blocks(client, internal_id: str) -> int:
+def _delete_all_doc_blocks(client: MondayGraphQLClient, internal_id: str) -> int:
     """Delete all blocks from a document. Returns the number of blocks deleted."""
     deleted = 0
     page = 1
@@ -308,9 +331,15 @@ def _delete_all_doc_blocks(client, internal_id: str) -> int:
 
 @docs_app.command("put")
 def put_doc(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item containing the doc column"),
-    column_name: Optional[str] = typer.Option(None, "--column-name", "-n", help="Name of the doc column"),
-    content: Optional[str] = typer.Option(None, "--content", "-c", help="Markdown content to write to the document"),
+    item_id: int | None = typer.Option(
+        None, "--item-id", "-i", help="ID of the item containing the doc column"
+    ),
+    column_name: str | None = typer.Option(
+        None, "--column-name", "-n", help="Name of the doc column"
+    ),
+    content: str | None = typer.Option(
+        None, "--content", "-c", help="Markdown content to write to the document"
+    ),
 ) -> None:
     """Replace document content with Markdown.
 

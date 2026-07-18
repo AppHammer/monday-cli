@@ -1,7 +1,6 @@
 """Commands for managing Monday.com status columns."""
 
 import json
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -15,7 +14,7 @@ from monday_cli.utils.output import print_json
 
 @statuses_app.command("list")
 def list_statuses(
-    board_id: Optional[int] = typer.Option(None, "--board-id", "-b", help="ID of the board"),
+    board_id: int | None = typer.Option(None, "--board-id", "-b", help="ID of the board"),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
 ) -> None:
     """List all available status columns and their options for a board.
@@ -40,10 +39,7 @@ def list_statuses(
         client = get_client()
 
         # Get board columns with settings
-        columns_result = client.execute_query(
-            GET_BOARD_COLUMNS,
-            {"boardIds": [str(board_id)]}
-        )
+        columns_result = client.execute_query(GET_BOARD_COLUMNS, {"boardIds": [str(board_id)]})
 
         boards = columns_result.get("boards", [])
         if not boards:
@@ -66,28 +62,26 @@ def list_statuses(
                     labels = settings.get("labels", {})
 
                     status_options = [
-                        {
-                            "index": int(idx),
-                            "label": label
-                        }
-                        for idx, label in labels.items()
+                        {"index": int(idx), "label": label} for idx, label in labels.items()
                     ]
 
                     # Sort by index
                     status_options.sort(key=lambda x: x["index"])
 
-                    status_columns.append({
-                        "column_id": col["id"],
-                        "column_title": col["title"],
-                        "statuses": status_options
-                    })
+                    status_columns.append(
+                        {
+                            "column_id": col["id"],
+                            "column_title": col["title"],
+                            "statuses": status_options,
+                        }
+                    )
                 except (json.JSONDecodeError, AttributeError, ValueError):
                     continue
 
         if not status_columns:
             typer.secho(
                 f"No status columns found on board '{board_name}' (ID: {board_id})",
-                fg=typer.colors.YELLOW
+                fg=typer.colors.YELLOW,
             )
             raise typer.Exit(0)
 
@@ -110,17 +104,14 @@ def list_statuses(
                     # Only show column info on first row
                     if i == 0:
                         rich_table.add_row(
-                            column_id,
-                            column_title,
-                            str(status["index"]),
-                            status["label"]
+                            column_id, column_title, str(status["index"]), status["label"]
                         )
                     else:
                         rich_table.add_row(
                             "",  # Empty column ID
                             "",  # Empty column title
                             str(status["index"]),
-                            status["label"]
+                            status["label"],
                         )
 
             console.print(rich_table)
@@ -130,7 +121,7 @@ def list_statuses(
             output = {
                 "board_id": str(board_id),
                 "board_name": board_name,
-                "status_columns": status_columns
+                "status_columns": status_columns,
             }
 
             print_json(output)

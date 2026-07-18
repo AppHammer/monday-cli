@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -73,9 +73,7 @@ class MondayGraphQLClient:
         self.client.close()
         logger.debug("Closed Monday GraphQL client")
 
-    def _make_request(
-        self, query: str, variables: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    def _make_request(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a GraphQL request.
 
         Args:
@@ -92,7 +90,7 @@ class MondayGraphQLClient:
             MondayAPIError: If API returns an error
             NetworkError: If network request fails
         """
-        payload = {"query": query}
+        payload: dict[str, Any] = {"query": query}
         if variables:
             payload["variables"] = variables
 
@@ -152,9 +150,7 @@ class MondayGraphQLClient:
         """Get rate-limited request method."""
         return self.rate_limiter(self.retry_decorator(self._make_request))
 
-    def execute_query(
-        self, query: str, variables: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    def execute_query(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         """Execute a GraphQL query with retry and rate limiting.
 
         Args:
@@ -167,8 +163,10 @@ class MondayGraphQLClient:
         Raises:
             Various exceptions from _make_request
         """
-        response = self._rate_limited_request(query, variables)
-        return response.get("data", {})
+        response: dict[str, Any] = cast(
+            dict[str, Any], self._rate_limited_request(query, variables)
+        )
+        return cast(dict[str, Any], response.get("data", {}))
 
     def execute_mutation(
         self, mutation: str, variables: dict[str, Any] | None = None
@@ -185,8 +183,10 @@ class MondayGraphQLClient:
         Raises:
             Various exceptions from _make_request
         """
-        response = self._rate_limited_request(mutation, variables)
-        return response.get("data", {})
+        response: dict[str, Any] = cast(
+            dict[str, Any], self._rate_limited_request(mutation, variables)
+        )
+        return cast(dict[str, Any], response.get("data", {}))
 
     def get_complexity(self) -> dict[str, Any]:
         """Get current API complexity information.
@@ -197,4 +197,4 @@ class MondayGraphQLClient:
         from monday_cli.client.queries import GET_COMPLEXITY
 
         response = self.execute_query(GET_COMPLEXITY)
-        return response.get("complexity", {})
+        return cast(dict[str, Any], response.get("complexity", {}))

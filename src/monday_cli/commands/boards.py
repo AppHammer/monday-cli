@@ -1,6 +1,6 @@
 """Commands for managing Monday.com boards."""
 
-from typing import Optional
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -14,14 +14,16 @@ from monday_cli.utils.output import print_json
 
 @boards_app.command("list")
 def list_boards(
-    state: Optional[str] = typer.Option(
+    state: str | None = typer.Option(
         "active",
         "--state",
         "-s",
         help="Board state: active, archived, deleted, all",
     ),
-    workspace_name: Optional[str] = typer.Option(None, "--workspace-name", "-w", help="Filter by workspace name"),
-    workspace_id: Optional[int] = typer.Option(None, "--workspace-id", help="Filter by workspace ID"),
+    workspace_name: str | None = typer.Option(
+        None, "--workspace-name", "-w", help="Filter by workspace name"
+    ),
+    workspace_id: int | None = typer.Option(None, "--workspace-id", help="Filter by workspace ID"),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
 ) -> None:
     """List all boards available to you.
@@ -62,7 +64,7 @@ def list_boards(
 
         while True:
             # Build variables
-            variables = {
+            variables: dict[str, Any] = {
                 "limit": limit,
                 "page": page,
             }
@@ -95,8 +97,10 @@ def list_boards(
         # Note: API doesn't support filtering by workspace name, only by ID
         if workspace_name:
             boards = [
-                board for board in boards
-                if board.get("workspace") and board["workspace"].get("name", "").lower() == workspace_name.lower()
+                board
+                for board in boards
+                if board.get("workspace")
+                and board["workspace"].get("name", "").lower() == workspace_name.lower()
             ]
 
         if not boards:

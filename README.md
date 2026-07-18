@@ -1,6 +1,18 @@
 # Monday CLI
 
-A command-line interface tool to interact with the Monday.com API. Built with Python and compiled to a standalone binary for Linux.
+**A command-line interface that lets AI agents drive Monday.com.** When you can't host the Monday.com MCP server, give your agent this instead: a single self-contained Linux binary it can shell out to for full Monday.com access. Built with Python, compiled to a standalone binary with no runtime dependencies.
+
+## Why this exists
+
+Agent frameworks increasingly talk to Monday.com through an MCP server, and that's the right tool when you can run one. But plenty of environments can't host an MCP server — locked-down CI, minimal or air-gapped containers, ephemeral agent sandboxes. `monday-cli` is the fallback for exactly those cases: drop one binary into the agent's `PATH` and it has full Monday.com access through a predictable, self-documenting command surface.
+
+The whole CLI is designed to be **used and discovered by an agent**, not just a human:
+
+- **Discover the tool from `--help`** — a consistent `monday <resource> <verb>` grammar with copy-pasteable examples on every command.
+- **Discover the board at runtime** — `items list-columns`, `statuses list`, and friends let an agent learn a board's schema before it acts.
+- **JSON by default** — clean, parseable output on stdout; `--table` is an optional human view.
+- **Human-readable inputs** — set a status with `--title "Status" --value "Done"` instead of raw column IDs and indices.
+- **Non-interactive** — `--all` for pagination, flags to skip confirmations, and non-zero exit codes so nothing blocks an automated run.
 
 ## Features
 
@@ -82,6 +94,8 @@ MONDAY_API_TOKEN=your_api_token_here
 ```
 
 ## Usage
+
+> **For agents:** you don't need to memorize this section. Every command is self-describing — run `monday --help` to see the resource groups, `monday <resource> --help` for a group's commands, and `monday <resource> <command> --help` for a command's options. The commands follow a predictable `monday <resource> <verb>` grammar with the standard verbs `list`, `get`, `create`, `update`, and `delete`. Output is JSON on stdout by default (add `--table` only for human reading), and when an input is wrong the error prints the valid choices (e.g. `Available statuses: ...`) so you can self-correct. Before acting on an unfamiliar board, discover its schema with `monday items list-columns --item-id <ID>` and `monday statuses list --board-id <ID>`.
 
 ### Global Options
 

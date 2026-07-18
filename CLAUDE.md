@@ -1,563 +1,104 @@
-# Claude Instructions for Monday CLI
+# CLAUDE.md
 
-This is a CLI tool for interacting with the Monday.com GraphQL API.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Structure
+# Project Overview
 
-```
-src/monday_cli/
-├── __init__.py          # Package init with version
-├── cli.py               # Main CLI entry point with all command group registrations
-├── client/
-│   ├── client.py        # HTTP client with retry/rate limiting
-│   ├── models.py        # Pydantic models for API responses
-│   ├── queries.py       # GraphQL query templates
-│   └── mutations.py     # GraphQL mutation templates
-├── commands/
-│   ├── workspaces.py    # Workspace management commands
-│   ├── boards.py        # Board management commands
-│   ├── groups.py        # Group management commands
-│   ├── items.py         # Item management commands
-│   ├── subitems.py      # Subitem management commands
-│   ├── statuses.py      # Status listing commands
-│   ├── updates.py       # Update management commands
-│   └── docs.py          # Document management commands
-└── utils/
-    ├── output.py        # Output formatting utilities (JSON, tables)
-    └── error_handler.py # Error handling and custom exceptions
-```
+Monday CLI exists to make it easy for **AI agents to use Monday.com**. It is the fallback for environments where the Monday.com MCP server cannot be hosted (locked-down CI, minimal or air-gapped containers, ephemeral agent sandboxes): instead of an MCP integration, an agent shells out to a single self-contained `monday` binary. The primary user is an autonomous agent, not a human at a keyboard, and every design decision should serve that audience.
 
-## Monday.com API
+It is a Python tool built with Typer and httpx, packaged into a standalone single-file Linux binary with PyInstaller so it can be dropped into any agent's `PATH` with no runtime dependencies.
 
-### Authentication
+## Project Management
+Monday Board Url:  https://apphammer.monday.com/boards/18422673287
 
-Get your API token from: https://apphammer.monday.com/admin/integrations/api
+Test Board Url:  https://apphammer.monday.com/boards/18422673411
+This is a scratch board for automated/integration tests that exercise the CLI against a live Monday.com board. Use this board — never the project-management board above — for any test that creates, mutates, or deletes items, subitems, groups, statuses, updates, or docs.
 
-Set the token as environment variable:
-```bash
-export MONDAY_API_TOKEN="your_token_here"
-```
+## Instructions for Claude
+1. Monday is the project north star. You can't code anything without a monday.com task.
+2. Always use the apphammer agents to perform your tasks:
+  pm - product management
+  sa - system architect
+  coder - software development, write code
+  qa - quality assurance
+  ui-testing - test the ui with playwright
+3. You can use other tools / skills for thinking, researching and brainstorming, but the apphammer agents do the real work.
+4. Follow a strict development flow:  
+  1. Every Monday task must be well-defined for the sa. The pm agent can create a FRD as needed, but all tasks need a feature ID FR-XXXX
+  2. the sa agent will break down the monday task into github issues. These are always labeled with the monday feature ID.
+  3. The coder agent is the only agent allowed to write code. Use /implement-issue --label to work on issues and qa them
+  4. Always pull requests, no commits working on main or commits to main ever.
+5. If you encounter a bug, issue or enhancement while working on a task, create a new task in monday on the backlog for it. We don't code anything without a monday task!
+6. As you complete phases update the status of the monday task, "Working on it", "Review", "Ready to Merge", etc. Post updated as needed.
+7. When possible parallelize your work and invoke subagents.
 
-### API Endpoint
-
-- Base URL: `https://api.monday.com/v2`
-- All requests are POST with GraphQL body
-- Authentication via `Authorization: your_api_token` header
-
-### GraphQL Patterns
-
-#### Queries
-
-Items query requires `ID!` type (string, not int):
-```graphql
-query GetItem($itemIds: [ID!]!) {
-  items(ids: $itemIds) {
-    id
-    name
-    board { id name }
-    column_values { id text value type }
-  }
-}
-```
-
-Board columns query (includes status settings):
-```graphql
-query GetBoardColumns($boardIds: [ID!]!) {
-  boards(ids: $boardIds) {
-    columns {
-      id
-      title
-      type
-      settings_str  # JSON string with status labels
-    }
-  }
-}
-```
-
-#### Mutations
-
-Create item:
-```graphql
-mutation CreateItem($boardId: ID!, $itemName: String!, $columnValues: JSON) {
-  create_item(board_id: $boardId, item_name: $itemName, column_values: $columnValues) {
-    id
-    name
-  }
-}
-```
-
-Update column value (for status changes):
-```graphql
-mutation ChangeColumnValue($boardId: ID!, $itemId: ID!, $columnId: String!, $value: JSON!) {
-  change_column_value(board_id: $boardId, item_id: $itemId, column_id: $columnId, value: $value) {
-    id
-  }
-}
-```
-
-### Status Columns
-
-Status columns have `settings_str` containing JSON with label mappings:
-```json
-{
-  "labels": {
-    "0": "Done",
-    "1": "Working on it",
-    "2": "Stuck"
-  }
-}
-```
-
-To update a status, use the index in the value:
-```json
-{"index": 1}  // Sets status to "Working on it"
-```
-
-### Rate Limiting
-
-- Monday.com has complexity-based rate limiting
-- Track complexity via `complexity { before after }` in queries
-- CLI implements 60 calls/minute conservative limit
-- Retry logic with exponential backoff (1s, 2s, 4s)
-
-### Common Column Types
-
-| Type | Description | Value Format |
-|------|-------------|--------------|
-| `status` | Status dropdown | `{"index": N}` |
-| `text` | Plain text | `"string value"` |
-| `date` | Date picker | `"YYYY-MM-DD"` |
-| `numbers` | Numeric | `"123"` or `123` |
-| `people` | Person picker | `{"personsAndTeams": [{"id": N, "kind": "person"}]}` |
-| `dropdown` | Dropdown | `{"ids": [1, 2]}` |
-
-## Development
-
-### Build Binary
+## Common Commands
 
 ```bash
+# Run from source (no build needed)
+python -m monday_cli --help
+python -m monday_cli items get --item-id 1234567890
+
+# Install for development (editable + dev deps)
+pip install -e ".[dev]"
+
+# Tests
+pytest                                   # full suite (coverage is on by default via pyproject addopts)
+pytest tests/unit                        # only unit tests
+pytest tests/unit/test_foo.py::test_bar  # a single test
+
+# Lint / format / type-check
+ruff check src tests
+black src tests
+mypy src            # strict mode is enabled
+
+# Build the standalone Linux binary -> dist/monday
 python build/build_binary.py
 ```
 
-Creates standalone Linux binary at `dist/monday`.
+Requires Python >= 3.11. Auth is via the `MONDAY_API_TOKEN` environment variable (loaded from `.env` if present); token comes from https://apphammer.monday.com/admin/integrations/api.
 
-### Run from Source
+## Architecture
 
-```bash
-python -m monday_cli --help
-```
+The package lives under `src/monday_cli/` (src layout; console entry point is `monday = monday_cli.cli:main`).
 
-### Testing
+**Command registration is import-driven and order-sensitive.** `cli.py` creates the root Typer `app` plus one sub-`Typer` per resource (`workspaces_app`, `boards_app`, `groups_app`, `items_app`, `subitems_app`, `statuses_app`, `updates_app`, `docs_app`). Each `commands/*.py` module imports its sub-app from `cli.py` and attaches commands via `@items_app.command(...)` decorators. Crucially, `cli.py` imports the command modules **at the bottom of the file** (after all definitions) to avoid a circular import — commands import from `cli`, and `cli` imports the commands last. Adding a new resource means creating the sub-`Typer`, registering it with `app.add_typer(...)`, and adding the module to that bottom-of-file import.
 
-```bash
-pytest
-```
+**Client layer** (`client/`):
+- `graphql_client.py` — `MondayGraphQLClient` wraps a single `httpx.Client`. All calls go through `_make_request`, which is composed at call time as `rate_limiter(retry_decorator(_make_request))` via the `_rate_limited_request` property. It maps HTTP 401 → `AuthenticationError`, 429 → `RateLimitError`, GraphQL `errors` → `MondayAPIError` (or `ComplexityError` when the message mentions complexity), and network failures → `NetworkError`. Public API is `execute_query()` / `execute_mutation()`, both returning the `data` dict.
+- `queries.py` / `mutations.py` — GraphQL operation strings as module constants (e.g. `GET_ITEM_BY_ID`, `CREATE_ITEM`, `CHANGE_COLUMN_VALUE`). Queries should include a `complexity { before after }` block so the client can log/warn on remaining budget.
+- `models.py` — Pydantic models for API responses.
 
-## CLI Framework
+**Cross-cutting utilities** (`utils/`): `rate_limit.py` (`MondayRateLimiter`, 60 calls/60s by default), `retry.py` (`create_retry_decorator`, exponential backoff), `error_handler.py` (exception hierarchy rooted at `MondayCliError`), `output.py` (`print_json` for machine-readable output; list commands also render Rich tables), and `logging.py`.
 
-Uses Typer (v0.21.0+) with **8 command groups**:
+**Config** (`config.py`): `Settings` is a `pydantic-settings` `BaseSettings` loaded from env / `.env`. Access it through the cached `get_settings()`; the client itself is lazily created once via `get_client()` in `cli.py` and closed in `main()`'s `finally`. Defaults (rate limits, retry, API URL, timeouts) live in `constants.py`.
 
-### Command Groups Overview
+## Agent-First Design Principles
 
-1. **`monday workspaces <command>`** - Workspace operations
-   - `list` - List workspaces with membership filtering
+The guiding principle for the CLI itself: it must be **usable and discoverable by an AI agent** that has no prior knowledge of a specific board and cannot ask a human for help. Every existing command follows these, and every new command or feature must uphold them — treat a change that breaks one as a regression:
 
-2. **`monday boards <command>`** - Board operations
-   - `list` - List boards with state and workspace filtering
+- **Discoverable from `--help` alone.** An agent should be able to learn the whole tool by walking `--help`. Keep a strict `monday <resource> <verb>` grammar, reuse the standard verbs (`list`, `get`, `create`, `update`, `delete`), and put concrete, copy-pasteable examples in every command docstring.
+- **Self-describing boards.** Ship commands that let an agent learn a board's schema at runtime *before* acting: `items list-columns`, `statuses list`, `subitems list-columns`, `subitems list-statuses`. Any new resource should provide an equivalent discovery command.
+- **Machine-readable by default.** Emit clean JSON on stdout via `print_json()` so an agent can parse output without scraping. `--table` is a human convenience layered on top — never the default.
+- **Errors that teach the next step.** On failure, print what to do next and the valid choices, then exit non-zero. This is already the pattern: a bad column title prints `Available columns: ...`, a bad status label prints `Available statuses: ...`, a missing arg prints an example invocation. Preserve it.
+- **Human-readable inputs over opaque IDs.** Let agents act on what they can see — accept names/titles/labels case-insensitively (e.g. `--title "Status" --value "Done"`) and resolve to column IDs and indices internally.
+- **Deterministic and non-interactive.** Anything scriptable must run without a TTY prompt: `--all` for pagination, and a flag to skip delete confirmations. (Note: this skip flag is currently inconsistent — `groups delete` uses `--confirm/-y` while `items delete` and `subitems delete` use `--force/-f`. Converge new destructive commands on one spelling; consistency is itself a discoverability feature.)
 
-3. **`monday groups <command>`** - Group operations
-   - `list` - List groups on a board
-   - `create` - Create new group
-   - `delete` - Delete group
+## Conventions
 
-4. **`monday items <command>`** - Item operations
-   - `get` - Get item details
-   - `list` - List items with pagination and group filtering
-   - `create` - Create new item
-   - `update` - Update item column value using human-readable titles
-   - `delete` - Delete item with confirmation
-   - `list-columns` - List all board columns with types and options
+- **CLI IDs are `int` typer options** for validation, but Monday's GraphQL uses `ID!` (string) — always `str(...)` an ID before putting it in query variables.
+- **Named options over positional args** for all commands (e.g. `monday items get --item-id 123`).
+- **All `list` commands support `--table`**; paginated list commands support `--limit` (1–500), `--cursor`, and `--all`.
+- **Output**: data via `print_json()`; user messages via `typer.secho()` (green = success with a `✓`, yellow = warning/not-found, red = error). Always `raise typer.Exit(1)` after an error message.
+- **Error handling in commands**: catch `AuthenticationError`, `RateLimitError`, `MondayAPIError`, then a catch-all `Exception`, in that order.
+- Command names are kebab-case (`list-columns`); function names are snake_case.
 
-5. **`monday subitems <command>`** - Subitem operations
-   - `get` - Get subitem details
-   - `list` - List subitems with pagination (by item or board)
-   - `create` - Create new subitem
-   - `update` - Update subitem column value using human-readable titles
-   - `delete` - Delete subitem with confirmation
-   - `list-columns` - List all board columns
-   - `list-statuses` - List status columns with options
+## Status columns
 
-6. **`monday statuses <command>`** - Status operations
-   - `list` - List all status columns and options for a board
+Status columns carry a `settings_str` JSON blob mapping index → label (e.g. `{"labels": {"0": "Done", "1": "Working on it"}}`). The `items update` / `subitems update` commands look up a column by title (case-insensitive), detect its type from the board schema, and format the value accordingly — status labels are matched case-insensitively and converted to `{"index": N}`; other handled types include text, link, date, numbers, and long-text.
 
-7. **`monday updates <command>`** - Update operations
-   - `create` - Post update to item or subitem
+## Reference
 
-8. **`monday docs <command>`** - Document operations
-   - `get` - Get document content as Markdown
-   - `append` - Append Markdown content to document (creates if needed)
-   - `put` - Replace document content with Markdown (clears existing content first)
-
-### Built-in Commands
-- `monday version` - Show version information
-- `monday --help` - Show help
-- `monday <group> --help` - Show group-specific help
-
-## Coding Guidelines
-
-### Adding New Commands
-
-1. **Choose the right file**: Add to existing command files based on the resource type:
-   - `commands/workspaces.py` - Workspace operations
-   - `commands/boards.py` - Board operations
-   - `commands/groups.py` - Group operations
-   - `commands/items.py` - Item operations
-   - `commands/subitems.py` - Subitem operations
-   - `commands/statuses.py` - Status listing operations
-   - `commands/updates.py` - Update operations
-   - `commands/docs.py` - Document operations
-   - Create a new file only for entirely new resource types
-
-2. **Command structure template**:
-```python
-@items_app.command("command-name")
-def command_name(
-    required_arg: int = typer.Argument(..., help="Description"),
-    optional_arg: Optional[str] = typer.Option(None, "--flag", "-f", help="Description"),
-) -> None:
-    """Short description of what the command does.
-
-    Example:
-        monday items command-name 1234567890
-    """
-    try:
-        client = get_client()
-        # ... implementation ...
-        print_json(result)
-
-    except AuthenticationError:
-        typer.secho(
-            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(1)
-    except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
-        raise typer.Exit(1)
-    except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-    except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-```
-
-3. **Required imports for commands**:
-```python
-import json
-from typing import Optional
-
-import typer
-
-from monday_cli.cli import get_client, items_app  # or workspaces_app, boards_app, groups_app, subitems_app, statuses_app, updates_app, docs_app
-from monday_cli.client.mutations import CHANGE_COLUMN_VALUE, CREATE_ITEM
-from monday_cli.client.queries import GET_BOARD_COLUMNS, GET_ITEM_BY_ID
-from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
-from monday_cli.utils.output import print_json, print_table  # Use print_table for --table option
-```
-
-### Adding New GraphQL Operations
-
-1. **Queries** go in `client/queries.py`:
-```python
-GET_SOMETHING = """
-query GetSomething($ids: [ID!]!) {
-  something(ids: $ids) {
-    id
-    name
-  }
-  complexity {
-    before
-    after
-  }
-}
-"""
-```
-
-2. **Mutations** go in `client/mutations.py`:
-```python
-DO_SOMETHING = """
-mutation DoSomething($id: ID!, $value: String!) {
-  do_something(id: $id, value: $value) {
-    id
-  }
-}
-"""
-```
-
-3. **Always include complexity tracking** in queries for rate limit monitoring.
-
-### ID Type Conventions
-
-- **Monday.com IDs** are strings in GraphQL but often passed as integers from CLI
-- Always convert to string when sending to API: `str(item_id)`
-- Use `int` type hint for CLI arguments for better validation
-- GraphQL uses `ID!` type which accepts strings
-
-### Output Conventions
-
-- Use `print_json()` for all data output (enables machine-readable output)
-- Use `typer.secho()` for user messages:
-  - Success: `fg=typer.colors.GREEN`
-  - Warning/not found: `fg=typer.colors.YELLOW`
-  - Error: `fg=typer.colors.RED`
-- Use checkmark for success: `"✓ Action completed successfully!"`
-
-### Error Handling Pattern
-
-Always handle these exceptions in order:
-1. `AuthenticationError` - Invalid API token
-2. `RateLimitError` - Rate limit exceeded
-3. `MondayAPIError` - API-specific errors
-4. `Exception` - Catch-all for unexpected errors
-
-Always `raise typer.Exit(1)` after error messages.
-
-### Development Guidelines
-
-- always use named arguments over positional for clarity
-  `monday items get --item-id 123` instead of `monday items get 123`
-- all `list` commands should support `--table` option for tabular output
-- `list` commands with pagination should support:
-  - `--limit` (1-500) for page size
-  - `--cursor` for continuation
-  - `--all` for automatic pagination through all results
-- standard commands `list`, `get`, `create`, `update`, `delete` for resources
-
-## Key Features Reference
-
-### Pagination Support
-
-Commands that support cursor-based pagination:
-- `monday items list` - Paginate through board items
-- `monday subitems list` (when using `--board-id`) - Paginate through subitems
-- `monday boards list` - Automatic pagination built-in (max 100 per page)
-
-Pagination options:
-```bash
---limit INT    # Items per page (1-500, default: 100)
---cursor TEXT  # Pagination cursor for next page
---all          # Fetch all items across all pages automatically
-```
-
-The API returns pagination info:
-```json
-{
-  "items": [...],
-  "pagination": {
-    "cursor": "MSw5NzI4MDA5MDAsaV9YcmxJb0p1VEdYc1VWeGlxeF9kLDg4MiwzNXw0MTQ1NzU1MTE5",
-    "has_more": true,
-    "total_items": 150,
-    "pages_fetched": 1
-  }
-}
-```
-
-### Column Value Updates
-
-The `items update` and `subitems update` commands support intelligent column type detection:
-
-**Supported column types:**
-- **status**: Matches label case-insensitively, converts to `{"index": N}`
-- **text**: Direct string value
-- **link**: URL string, converts to `{"url": "value", "text": "value"}`
-- **date**: Date string (YYYY-MM-DD), converts to `{"date": "value"}`
-- **numbers**: Numeric string or number
-- **long-text**: Text content (for long text columns)
-
-**Auto-detection workflow:**
-1. Look up column by title (case-insensitive)
-2. Detect column type from board schema
-3. Format value appropriately for the type
-4. For status: match label and find index, show available options if not found
-5. Update using the Monday.com API
-
-Example:
-```bash
-monday items update --item-id 123 --title "Status" --value "done"
-# Auto-detects status column, finds "Done" label, converts to {"index": 0}
-```
-
-### Table Output
-
-All `list` commands support `--table` flag for rich table formatting:
-- Formatted columns with proper alignment
-- Color-coded headers
-- Human-readable layout
-- Supports: workspaces, boards, groups, items, subitems, statuses
-
-Example:
-```bash
-monday items list --board-id 123 --table
-```
-
-### Filtering and Querying
-
-**Workspace filtering:**
-- `--membership-kind` (all, member)
-- `--workspace-ids` (comma-separated IDs)
-
-**Board filtering:**
-- `--state` (active, archived, deleted, all)
-- `--workspace-name` (case-insensitive name matching)
-- `--workspace-id` (exact ID match)
-
-**Item filtering:**
-- `--group` (case-insensitive group title)
-- `--group-id` (exact group ID)
-
-**Examples:**
-```bash
-# Active boards in a workspace
-monday boards list --state active --workspace-name "Marketing"
-
-# Items from specific group
-monday items list --board-id 123 --group "Sprint 1"
-```
-
-### Group Management
-
-Groups organize items on boards and support:
-- Color customization (hex codes)
-- Deletion confirmation (with `--confirm` flag to skip)
-- Position tracking
-
-Color format: `#ff642e` or `#f09`
-
-### Document Operations
-
-Monday.com doc columns can be managed programmatically:
-- Create documents with optional initial content
-- Replace document content (`put`) - clears all existing blocks, then writes new markdown
-- Append to document content (`append`) - adds markdown content without clearing
-- Retrieve document content as Markdown (`get`)
-- Lookup columns by name (case-insensitive)
-- Validates column type is `doc`
-
-The `docs get` command returns Markdown content (falls back to block JSON if export not supported).
-
-### Testing Changes
-
-```bash
-# Run from source
-python -m monday_cli --help
-python -m monday_cli items --help
-
-# Build and test binary
-python build/build_binary.py
-./dist/monday --help
-```
-
-### Style Guidelines
-
-- Use kebab-case for command names: `list-columns`, `update-status`
-- Use snake_case for function names: `list_columns`, `update_status`
-- Include docstrings with examples for all commands
-- Keep command help text concise but descriptive
-
-## Common Usage Examples
-
-### Workflow: Creating and Managing Items
-
-```bash
-# 1. Find your workspace and board
-monday workspaces list --table
-monday boards list --workspace-name "Engineering" --table
-
-# 2. Create a group for organization
-monday groups create --title "Sprint 5" --board-id 1234567890 --color "#ff642e"
-
-# 3. Create an item
-monday items create --board-id 1234567890 --name "Build new feature" --group-id "sprint_5"
-
-# 4. Update item status
-monday items update --item-id 9876543210 --title "Status" --value "Working on it"
-
-# 5. Add update/comment
-monday updates create --item-id 9876543210 --body "Started implementation"
-
-# 6. Create subitems for task breakdown
-monday subitems create --parent-item-id 9876543210 --name "Write tests"
-monday subitems create --parent-item-id 9876543210 --name "Code review"
-
-# 7. Update subitem status
-monday subitems update --subitem-id 1111111111 --title "Status" --value "Done"
-
-# 8. List all items with filtering
-monday items list --board-id 1234567890 --group "Sprint 5" --all --table
-```
-
-### Workflow: Discovering Board Structure
-
-```bash
-# 1. List all columns on a board
-monday items list-columns --item-id 9876543210
-
-# 2. See available status options
-monday statuses list --board-id 1234567890 --table
-
-# 3. List groups on a board
-monday groups list --board-id 1234567890 --table
-
-# 4. List items by group
-monday items list --board-id 1234567890 --group-id "topics" --table
-```
-
-### Workflow: Document Management
-
-```bash
-# Replace document content with Markdown (clears existing, then writes new)
-monday docs put --item-id 9876543210 --column-name "Notes" --content "# Project Requirements\n\n- Item 1\n- Item 2"
-
-# Append content to existing document (or create new)
-monday docs append --item-id 9876543210 --column-name "Notes" --content "## Additional Notes\n\n- Item 3"
-
-# Read document content as Markdown
-monday docs get --item-id 9876543210 --column-name "Notes"
-```
-
-### Workflow: Deleting Items and Subitems
-
-```bash
-# Delete an item (with confirmation prompt)
-monday items delete --item-id 9876543210
-
-# Delete an item without confirmation (for scripts)
-monday items delete --item-id 9876543210 --force
-
-# Delete a subitem (with confirmation prompt)
-monday subitems delete --subitem-id 1111111111
-
-# Delete a subitem without confirmation (for scripts)
-monday subitems delete --subitem-id 1111111111 --force
-```
-
-### Workflow: Pagination
-
-```bash
-# List first page of items
-monday items list --board-id 1234567890 --limit 50
-
-# Continue from cursor (copy cursor from previous response)
-monday items list --board-id 1234567890 --cursor "MSw5NzI4MDA5MDAsaV9YcmxJb..."
-
-# Or fetch all automatically
-monday items list --board-id 1234567890 --all
-```
-
-## API Reference
-
-- [Monday.com API Docs](https://developer.monday.com/api-reference/reference/about-the-api-reference)
-- [GraphQL Guide](https://developer.monday.com/api-reference/docs/introduction-to-graphql)
-- [Column Types](https://developer.monday.com/api-reference/docs/column-types-reference)
-- [Rate Limits](https://developer.monday.com/api-reference/docs/rate-limits)
+- Monday.com API: https://developer.monday.com/api-reference/reference/about-the-api-reference
+- Column types: https://developer.monday.com/api-reference/docs/column-types-reference
+- Version is defined in `pyproject.toml` and `src/monday_cli/__init__.py`; user-facing changes are recorded in `CHANGELOG.md`. Releases are built by `.github/workflows/release.yml`.

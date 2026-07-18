@@ -504,17 +504,28 @@ monday docs create --item-id 1234567890 --column-name "Notes" --content "Meeting
 ```
 
 **Get document content:**
+
+> **Breaking change (v0.6.0):** `monday docs get` now emits a deterministic JSON object
+> `{"markdown": ..., "blocks": [...]}` by default. The previous Markdown-by-default behaviour
+> is now behind `--raw` / `--markdown`. Update any scripts that relied on the old bare-Markdown
+> output to use `monday docs get --raw` instead.
+
 ```bash
-monday docs get --item-id <ITEM_ID> --column-name <COLUMN_NAME>
+monday docs get --item-id <ITEM_ID> --column-name <COLUMN_NAME> [OPTIONS]
 
 Options:
   -i, --item-id TEXT      Item ID (required)
   -n, --column-name TEXT  Doc column name (required)
+  --raw / --markdown      Print rendered Markdown to stdout (human opt-out of the default JSON).
+                          '--raw' is canonical; '--markdown' is an alias.
+                          Errors if Markdown export is unavailable.
 ```
 
-Retrieves all blocks from a document, including their type and content.
+Returns a lossless JSON object with two keys:
+- `markdown`: rendered Markdown string, or `null` if Markdown export is unsupported
+- `blocks`: raw block JSON (always populated for documents with content)
 
-Example:
+Example (default — machine-readable JSON):
 ```bash
 monday docs get --item-id 1234567890 --column-name "Monday Doc"
 ```
@@ -522,7 +533,7 @@ monday docs get --item-id 1234567890 --column-name "Monday Doc"
 Output:
 ```json
 {
-  "id": "123456",
+  "markdown": "# My Document\n\nDocument content here.",
   "blocks": [
     {
       "id": "block-1",
@@ -531,6 +542,13 @@ Output:
     }
   ]
 }
+```
+
+Example (human-readable Markdown):
+```bash
+monday docs get --item-id 1234567890 --column-name "Monday Doc" --raw
+# or equivalently:
+monday docs get --item-id 1234567890 --column-name "Monday Doc" --markdown
 ```
 
 ### Other Commands

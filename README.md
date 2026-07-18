@@ -8,11 +8,31 @@ Agent frameworks increasingly talk to Monday.com through an MCP server, and that
 
 The whole CLI is designed to be **used and discovered by an agent**, not just a human:
 
+- **Start with `monday guide`** — the primary discovery command. One invocation prints a complete, agent-oriented usage guide (grammar, verbs, output model, runtime board discovery, and end-to-end workflows) so an agent with zero board knowledge can operate the tool without walking `--help` across many calls.
 - **Discover the tool from `--help`** — a consistent `monday <resource> <verb>` grammar with copy-pasteable examples on every command.
 - **Discover the board at runtime** — `items list-columns`, `statuses list`, and friends let an agent learn a board's schema before it acts.
 - **JSON by default** — clean, parseable output on stdout; `--table` is an optional human view.
 - **Human-readable inputs** — set a status with `--title "Status" --value "Done"` instead of raw column IDs and indices.
 - **Non-interactive** — `--all` for pagination, flags to skip confirmations, and non-zero exit codes so nothing blocks an automated run.
+
+### Discovery: start here
+
+`monday-cli` exposes a three-layer discovery model. The CLI is the single source of truth for its own usage — there is no hand-maintained `SKILL.md` in this repo; it is generated on demand.
+
+1. **`monday guide` — PRIMARY.** The canonical, in-binary, single-shot agent guide. Read it first. Use `monday guide --json` for the full command tree as machine-readable JSON when synthesizing tool/function definitions.
+2. **`monday <resource> <verb> --help`.** Authoritative, always-current per-command option detail.
+3. **`monday skill.md`.** Generates a thin Claude Code `SKILL.md` (valid YAML frontmatter + a body that points back at `monday guide`) for skill-aware harnesses. `monday guide --skill` is an equivalent alias.
+
+```bash
+# The one command to learn the whole CLI
+monday guide
+
+# Machine-readable command tree (for building tool/function schemas)
+monday guide --json
+
+# Emit a drop-in SKILL.md for a skill-aware harness
+monday skill.md > SKILL.md
+```
 
 ## Features
 

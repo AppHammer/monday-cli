@@ -33,6 +33,7 @@ dev = [
     "ruff>=0.1.15",
     "mypy>=1.8.0",
     "pyinstaller>=6.3.0",
+    "python-semantic-release>=9.0.0",
 ]
 
 [project.scripts]
@@ -66,3 +67,66 @@ addopts = "-v --cov=src/monday_cli --cov-report=html --cov-report=term"
 markers = [
     "integration: live integration tests against the Monday.com API (requires MONDAY_API_TOKEN); select with -m integration",
 ]
+
+# =============================================================================
+# python-semantic-release configuration
+#
+# Tool choice rationale: python-semantic-release (PSR) is Python-native, reads
+# and writes the version directly from/to pyproject.toml, generates CHANGELOG.md
+# in Conventional Commits format, creates annotated git tags, and publishes
+# GitHub Releases — all in one step. This avoids adding a Node.js toolchain and
+# keeps the release automation in a single tool that's already familiar to
+# Python maintainers.
+#
+# Version source of truth: pyproject.toml [project].version only.
+# src/monday_cli/__init__.py reads the version via importlib.metadata at runtime
+# and in the built binary (PyInstaller --copy-metadata=monday-cli propagates it).
+# =============================================================================
+
+[tool.semantic_release]
+major_on_zero = false  # 0.x: breaking changes bump the minor (=> 0.6.0), not 1.0.0
+# The single source of version truth: project.version in pyproject.toml
+version_toml = ["pyproject.toml:project.version"]
+
+# Commit parser: Conventional Commits (Angular-style)
+# "conventional" is the current name in PSR >= 9; "angular" is deprecated.
+# Mapping: feat → minor, fix/perf → patch, feat!: / BREAKING CHANGE: → major
+commit_parser = "conventional"
+
+# Tag format must match the existing release.yml trigger: v*.*.*
+tag_format = "v{version}"
+
+# Do not build/upload to PyPI (PyPI publishing is out of scope for FR-0003)
+build_command = ""
+upload_to_pypi = false
+upload_to_release = true
+
+[tool.semantic_release.commit_parser_options]
+# Explicit bump mapping (mirrors commitlint.config.js type-enum)
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
+
+[tool.semantic_release.changelog]
+# Changelog output path
+default_templates = { changelog_file = "CHANGELOG.md" }
+# Exclude non-user-facing commit types from generated changelog entries
+exclude_commit_patterns = [
+    "^chore",
+    "^ci",
+    "^build",
+    "^style",
+    "^test",
+    "^refactor",
+]
+
+[tool.semantic_release.branches.main]
+# Release from the main branch only. PSR >= 9 uses a branches table instead of
+# the deprecated top-level `branch` key.
+match = "main"
+
+[tool.semantic_release.remote]
+type = "github"
+# Use GH_TOKEN secret (not GITHUB_TOKEN) for pushing to protected main.
+# The default GITHUB_TOKEN cannot push past branch protection on main.
+# See README.md "Release Bot Token Setup" for configuration steps.
+token = { env = "GH_TOKEN" }

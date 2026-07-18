@@ -10,12 +10,14 @@ on any board.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from tests.integration.helpers import run_cli
 
 
-def _board_ids(data: dict) -> set[str]:
+def _board_ids(data: dict[str, Any]) -> set[str]:
     return {str(board["id"]) for board in data.get("boards", [])}
 
 

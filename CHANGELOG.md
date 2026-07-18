@@ -1,32 +1,19 @@
 # CHANGELOG
 
 
-## Unreleased — FR-0006 quality baseline (no version bump: chore/ci only)
+## v0.6.1 (2026-07-18)
 
-### Added
+### Bug Fixes
 
-- Lint & type-check CI gate (`quality.yml`): `ruff check`, `black --check`, and `mypy` enforced on
-  every pull request and push to main. Failures name the failing tool. (Closes #42)
+- Reliable large-document writes to Monday doc columns (FR-0005)
+  ([#55](https://github.com/AppHammer/monday-cli/pull/55),
+  [`ab372ea`](https://github.com/AppHammer/monday-cli/commit/ab372eaaabedb195935e545ef383878b0eb8283a))
 
-### Changed
+Safe large put (preflight/chunking + per-request timeout), idempotent put/append, block-order +
+  timeout hardening, docs clear/reset, lossless docs get blocks. Live-QA'd on the test board;
+  reviewed + fix-looped.
 
-- Cleaned `src/` to pass the documented quality gate with no public CLI or output change: (Closes
-  #39, #40, #41)
-  - Applied `black` formatting to all 12 files that were not yet conformant (line-length 100,
-    target py311). Formatting-only; no logic or string-content changes.
-  - Resolved all `ruff check src` findings to zero: auto-fixed `UP045` (`Optional[X]` → `X | None`)
-    and `I001` (import sort); hand-fixed 16 `E501` line-too-long violations in `commands/` by
-    splitting long strings across implicit string concatenation and extracting intermediate variables.
-    Migrated `[tool.ruff]` `select` to `[tool.ruff.lint]` (location move only; identical rule set).
-  - Fixed all 15 `mypy --strict` errors across 6 files: annotated `payload` dict type in
-    `graphql_client.py`; `cast()` on `Any` returns from `_rate_limited_request`; typed `variables`
-    dicts in `workspaces.py` and `boards.py` as `dict[str, Any]`; added a defensive `(group or "")`
-    guard in `items.py` for the `str | None` union-attr; removed stale `# type: ignore` in
-    `retry.py`; added full type annotations to four private helpers in `docs.py`. No runtime
-    behavior change — the `items.py` None guard is defensive only (group is guaranteed non-None in
-    that branch at runtime).
-- Documented the quality gate in `CLAUDE.md` (Closes #43): added CI-enforcement note to the "Lint /
-  format / type-check" block and added `quality.yml` to the CI Workflows table.
+Closes #32, closes #33, closes #34, closes #35, closes #36, closes #38
 
 
 ## v0.6.0 (2026-07-18)

@@ -1,22 +1,54 @@
 name: Build and Release Binary
 
+# Triggered by the annotated tag pushed by semantic-release.yml (v*.*.*).
+#
+# Ownership boundary (FR-0003 US-0003-05, Option A):
+#  - semantic-release.yml owns: version bump, CHANGELOG update, git tag, and the
+#    GitHub Release object (created by python-semantic-release via upload_to_release).
+#  - This workflow owns: building the Linux binary, verifying it, and uploading
+#    the binary assets to the already-created GitHub Release.
+#
+# Release notes source: python-semantic-release generates the notes from
+# Conventional Commits and attaches them to the Release it creates.
+# The old CHANGELOG.md awk/grep extraction has been removed in favour of
+# auto-generated notes (see semantic-release.yml and [tool.semantic_release] in
+# pyproject.toml).
+#
+# Version propagation: pip install -e . re-reads the (already bumped) version
+# from pyproject.toml, so --copy-metadata=monday-cli embeds the correct version
+# in the binary. The "Test binary" step asserts `monday version` prints it.
+#
+# Python version note: pinned to 3.13 here (matching prior release.yml) even
+# though pyproject.toml targets >=3.11. The binary is produced from 3.13 to
+# maximise forward compatibility. Flag for team standardisation if needed.
+#
+# Concurrency: one build per tag. A tag is immutable so cancel-in-progress is
+# safe (the same tag cannot be pushed twice).
+
 on:
   push:
     tags:
-      - 'v*.*.*'  # Trigger on version tags like v1.0.0, v1.2.3
-  workflow_dispatch:  # Allow manual trigger for testing
+      - 'v*.*.*'  # Triggered by the annotated tag from semantic-release.yml
+  workflow_dispatch:  # Manual trigger for testing / emergency releases
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
-  contents: write  # Required for creating releases
+  contents: write  # Required for uploading release assets
 
 jobs:
-  build-and-release:
-    name: Build and Release Linux Binary
+  build-and-attach:
+    name: Build Linux Binary and Attach to Release
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # Check out the tagged commit so pyproject.toml has the bumped version
+          ref: ${{ github.ref }}
 
       - name: Set up Python 3.13
         uses: actions/setup-python@v5
@@ -31,10 +63,20 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Install package
+        # Re-installing after the version bump ensures --copy-metadata=monday-cli
+        # embeds the released version into the binary at build time.
         run: pip install -e .
 
       - name: Build binary
         run: python build/build_binary.py
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Remove 'v' prefix from tag to get version (e.g. v0.6.0 → 0.6.0)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
 
       - name: Test binary
         run: |
@@ -44,14 +86,15 @@ jobs:
           dist/monday items --help
           dist/monday subitems --help
           dist/monday updates --help
-
-      - name: Extract version from tag
-        id: version
-        run: |
-          # Remove 'v' prefix from tag to get version
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION"
+          # Verify the binary reports the released version (proves metadata propagation)
+          BINARY_VERSION=$(dist/monday version --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('version',''))" 2>/dev/null || dist/monday version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+          echo "Binary reports version: $BINARY_VERSION"
+          echo "Expected version:       ${{ steps.version.outputs.version }}"
+          if [ "$BINARY_VERSION" != "${{ steps.version.outputs.version }}" ]; then
+            echo "ERROR: Binary version mismatch! Expected ${{ steps.version.outputs.version }}, got $BINARY_VERSION"
+            exit 1
+          fi
+          echo "✓ Version propagation confirmed"
 
       - name: Rename binary with platform suffix
         run: mv dist/monday dist/monday-linux
@@ -62,33 +105,9 @@ jobs:
           sha256sum monday-linux > monday-linux.sha256
           cat monday-linux.sha256
 
-      - name: Extract release notes from CHANGELOG
-        id: changelog
+      - name: Build installation instructions
         run: |
-          # Extract the section for this version from CHANGELOG.md
-          VERSION="${{ steps.version.outputs.version }}"
-
-          # Try to find the version section in CHANGELOG.md
-          if grep -q "\[${VERSION}\]" CHANGELOG.md; then
-            # Extract content between this version and the next version heading
-            awk "/\[${VERSION}\]/,/^## \[/" CHANGELOG.md | sed '$d' > release_notes.md
-          else
-            # If version not found, use Unreleased section or create generic notes
-            if grep -q "\[Unreleased\]" CHANGELOG.md; then
-              awk '/\[Unreleased\]/,/^## \[/' CHANGELOG.md | sed '$d' > release_notes.md
-            else
-              # Generic release notes
-              cat << EOF > release_notes.md
-          ## Monday CLI v${VERSION}
-
-          See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
-          EOF
-            fi
-          fi
-
-      - name: Append installation instructions to release notes
-        run: |
-          cat << 'EOF' >> release_notes.md
+          cat << 'EOF' > install_notes.md
 
           ---
 
@@ -102,22 +121,15 @@ jobs:
           sudo mv monday-linux /usr/local/bin/monday
           ```
 
-          Or download and install manually:
+          Or with curl:
 
           ```bash
-          # Download the binary
           curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/monday-linux -o monday
-
-          # Make it executable
           chmod +x monday
-
-          # Move to your PATH
           sudo mv monday /usr/local/bin/
           ```
 
           ### Verification
-
-          Verify the download with SHA256 checksum:
 
           ```bash
           wget https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/monday-linux.sha256
@@ -126,32 +138,16 @@ jobs:
 
           ### Configuration
 
-          Set your Monday.com API token:
-
           ```bash
           export MONDAY_API_TOKEN="your_api_token_here"
-          ```
-
-          Or create a `.env` file in your project directory:
-
-          ```
-          MONDAY_API_TOKEN=your_api_token_here
           ```
 
           ### Quick Start
 
           ```bash
-          # Show help
           monday --help
-
-          # Get an item
-          monday items get <item_id>
-
-          # Create an item
-          monday items create <board_id> --name "Task name"
-
-          # Create a subitem
-          monday subitems create <parent_item_id> --name "Subtask name"
+          monday items get --item-id <item_id>
+          monday items create --board-id <board_id> --name "Task name"
           ```
 
           ### Documentation
@@ -165,16 +161,21 @@ jobs:
           Generated with [Monday CLI](https://github.com/${{ github.repository }})
           EOF
 
-      - name: Display release notes
-        run: cat release_notes.md
-
-      - name: Create GitHub Release
+      - name: Upload binary assets to GitHub Release
+        # The GitHub Release was already created by python-semantic-release
+        # (semantic-release.yml). We only upload the binary assets here.
+        # softprops/action-gh-release will update the existing Release rather
+        # than create a new one when the tag already exists.
         uses: softprops/action-gh-release@v2
         with:
           name: Monday CLI v${{ steps.version.outputs.version }}
-          body_path: release_notes.md
+          # Append install instructions to the auto-generated release notes
+          # produced by python-semantic-release. If the Release already has a
+          # body (from PSR), this prepends our install section.
+          append_body: true
+          body_path: install_notes.md
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}  # Mark as prerelease if version contains hyphen (e.g., v1.0.0-beta)
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             dist/monday-linux
             dist/monday-linux.sha256

@@ -1,7 +1,5 @@
 """Commands for managing Monday.com updates."""
 
-from typing import Optional
-
 import typer
 
 from monday_cli.cli import get_client, updates_app
@@ -13,7 +11,7 @@ from monday_cli.utils.output import print_json
 
 @updates_app.command("get")
 def get_updates(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item"),
+    item_id: int | None = typer.Option(None, "--item-id", "-i", help="ID of the item"),
 ) -> None:
     """Get updates and replies for an item.
 
@@ -63,10 +61,8 @@ def get_updates(
 
 @updates_app.command("create")
 def create_update(
-    item_id: Optional[int] = typer.Option(
-        None, "--item-id", "-i", help="ID of the item or subitem"
-    ),
-    body: Optional[str] = typer.Option(None, "--body", "-b", help="Update text content"),
+    item_id: int | None = typer.Option(None, "--item-id", "-i", help="ID of the item or subitem"),
+    body: str | None = typer.Option(None, "--body", "-b", help="Update text content"),
 ) -> None:
     """Create an update on an item or subitem.
 

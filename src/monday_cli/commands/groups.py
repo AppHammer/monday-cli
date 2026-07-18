@@ -1,7 +1,5 @@
 """Commands for managing Monday.com groups."""
 
-from typing import Optional
-
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -15,7 +13,7 @@ from monday_cli.utils.output import print_json
 
 @groups_app.command("list")
 def list_groups(
-    board_id: Optional[int] = typer.Option(None, "--board-id", "-b", help="ID of the board"),
+    board_id: int | None = typer.Option(None, "--board-id", "-b", help="ID of the board"),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
 ) -> None:
     """List all groups on a board.
@@ -123,9 +121,7 @@ def list_groups(
 def create_group(
     title: str = typer.Option(..., "--title", "-t", help="Title of the new group"),
     board_id: int = typer.Option(..., "--board-id", "-b", help="ID of the board"),
-    color: Optional[str] = typer.Option(
-        None, "--color", "-c", help="Hex color code (e.g., #ff642e)"
-    ),
+    color: str | None = typer.Option(None, "--color", "-c", help="Hex color code (e.g., #ff642e)"),
 ) -> None:
     """Create a new group on a board.
 

@@ -1,7 +1,5 @@
 """Commands for managing Monday.com workspaces."""
 
-from typing import Optional
-
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -14,13 +12,13 @@ from monday_cli.utils.output import print_json
 
 @workspaces_app.command("list")
 def list_workspaces(
-    membership_kind: Optional[str] = typer.Option(
+    membership_kind: str | None = typer.Option(
         "all",
         "--membership-kind",
         "-m",
         help="Filter by membership: all, member",
     ),
-    workspace_ids: Optional[str] = typer.Option(
+    workspace_ids: str | None = typer.Option(
         None,
         "--workspace-ids",
         "-w",
@@ -48,8 +46,9 @@ def list_workspaces(
         # Validate membership_kind parameter
         valid_membership_kinds = ["all", "member"]
         if membership_kind and membership_kind.lower() not in valid_membership_kinds:
+            valid_opts = ", ".join(valid_membership_kinds)
             typer.secho(
-                f"Error: Invalid membership-kind '{membership_kind}'. Valid options: {', '.join(valid_membership_kinds)}",
+                f"Error: Invalid membership-kind '{membership_kind}'. Valid options: {valid_opts}",
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
@@ -86,7 +85,8 @@ def list_workspaces(
         if not workspaces:
             typer.secho("No workspaces found matching your criteria.", fg=typer.colors.YELLOW)
             typer.secho(
-                "Tip: Try 'monday workspaces list --membership-kind all' to see all accessible workspaces",
+                "Tip: Try 'monday workspaces list --membership-kind all'"
+                " to see all accessible workspaces",
                 fg=typer.colors.BLUE,
             )
             raise typer.Exit(0)

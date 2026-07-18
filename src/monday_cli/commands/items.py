@@ -1,7 +1,6 @@
 """Commands for managing Monday.com items."""
 
 import json
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -21,9 +20,7 @@ from monday_cli.utils.output import print_json
 
 @items_app.command("get")
 def get_item(
-    item_id: Optional[int] = typer.Option(
-        None, "--item-id", "-i", help="ID of the item to retrieve"
-    ),
+    item_id: int | None = typer.Option(None, "--item-id", "-i", help="ID of the item to retrieve"),
 ) -> None:
     """Get all information for a specific item by ID.
 
@@ -76,12 +73,12 @@ def get_item(
 
 @items_app.command("create")
 def create_item(
-    board_id: Optional[int] = typer.Option(
+    board_id: int | None = typer.Option(
         None, "--board-id", "-b", help="ID of the board to create item on"
     ),
-    item_name: Optional[str] = typer.Option(None, "--name", "-n", help="Name of the new item"),
-    group_id: Optional[str] = typer.Option(None, "--group-id", "-g", help="Group ID (optional)"),
-    column_values: Optional[str] = typer.Option(
+    item_name: str | None = typer.Option(None, "--name", "-n", help="Name of the new item"),
+    group_id: str | None = typer.Option(None, "--group-id", "-g", help="Group ID (optional)"),
+    column_values: str | None = typer.Option(
         None,
         "--column-values",
         "-c",
@@ -95,7 +92,8 @@ def create_item(
 
         monday items create --board-id 1234567890 --name "New Task" --group-id "topics"
 
-        monday items create --board-id 1234567890 --name "New Task" --column-values '{"status":{"index":1}}'
+        monday items create --board-id 1234567890 --name "New Task" \
+            --column-values '{"status":{"index":1}}'
     """
     try:
         if board_id is None:
@@ -173,11 +171,11 @@ def create_item(
 
 @items_app.command("update")
 def update_item(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item"),
-    title: Optional[str] = typer.Option(
+    item_id: int | None = typer.Option(None, "--item-id", "-i", help="ID of the item"),
+    title: str | None = typer.Option(
         None, "--title", "-t", help="Column title (e.g., 'Status', 'Github Issue Link')"
     ),
-    value: Optional[str] = typer.Option(None, "--value", "-v", help="Value to set"),
+    value: str | None = typer.Option(None, "--value", "-v", help="Value to set"),
 ) -> None:
     """Update an item column value using human-readable column titles.
 
@@ -384,7 +382,7 @@ def update_item(
 
 @items_app.command("list-columns")
 def list_columns(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item"),
+    item_id: int | None = typer.Option(None, "--item-id", "-i", help="ID of the item"),
 ) -> None:
     """List all board columns for an item in an easy-to-use format.
 
@@ -485,19 +483,19 @@ def list_columns(
 
 @items_app.command("list")
 def list_items(
-    board_id: Optional[int] = typer.Argument(None, help="ID of the board to list items from"),
-    board_id_opt: Optional[int] = typer.Option(
+    board_id: int | None = typer.Argument(None, help="ID of the board to list items from"),
+    board_id_opt: int | None = typer.Option(
         None, "--board-id", "-b", help="ID of the board to list items from"
     ),
     limit: int = typer.Option(100, "--limit", "-l", help="Items per page (max 500)"),
     all_pages: bool = typer.Option(False, "--all", "-a", help="Fetch all items across all pages"),
-    cursor: Optional[str] = typer.Option(
+    cursor: str | None = typer.Option(
         None, "--cursor", "-c", help="Pagination cursor for next page"
     ),
-    group: Optional[str] = typer.Option(
+    group: str | None = typer.Option(
         None, "--group", "-g", help="Filter by group title (case-insensitive)"
     ),
-    group_id: Optional[str] = typer.Option(
+    group_id: str | None = typer.Option(
         None, "--group-id", help="Filter by group ID (exact match)"
     ),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
@@ -530,7 +528,8 @@ def list_items(
 
         monday items list --board-id 1234567890 --group "Topics" --all
 
-        monday items list --board-id 1234567890 --cursor "MSw5NzI4MDA5MDAsaV9YcmxJb0p1VEdYc1VWeGlxeF9kLDg4MiwzNXw0MTQ1NzU1MTE5"
+        monday items list --board-id 1234567890 \
+            --cursor "MSw5NzI4MDA5MDAsaV9YcmxJb0p1VEdYc1VWeGlxeF9kLDg4MiwzNXw0MTQ1NzU1MTE5"
 
         monday items list --board-id 1234567890 --table
     """
@@ -598,7 +597,8 @@ def list_items(
                 fg=typer.colors.BLUE,
             )
             typer.secho(
-                "The 'items list' command is for listing main items/tasks from regular boards only.",
+                "The 'items list' command is for listing main items/tasks"
+                " from regular boards only.",
                 fg=typer.colors.YELLOW,
             )
             raise typer.Exit(1)
@@ -679,8 +679,9 @@ def list_items(
 
             # Show filter info when fetching multiple pages
             if all_pages and original_count != filtered_count:
+                group_label = group or group_id
                 typer.secho(
-                    f"Filtered {original_count} items to {filtered_count} in group '{group or group_id}'",
+                    f"Filtered {original_count} items to {filtered_count} in group '{group_label}'",
                     fg=typer.colors.GREEN,
                 )
 
@@ -734,7 +735,8 @@ def list_items(
             else:
                 if next_cursor:
                     typer.secho(
-                        f"\nShowing {len(all_items)} items. Use --cursor to get next page or --all to fetch all items.",
+                        f"\nShowing {len(all_items)} items. "
+                        "Use --cursor to get next page or --all to fetch all items.",
                         fg=typer.colors.BLUE,
                     )
                 else:
@@ -787,7 +789,7 @@ def list_items(
 
 @items_app.command("delete")
 def delete_item(
-    item_id: Optional[int] = typer.Option(None, "--item-id", "-i", help="ID of the item to delete"),
+    item_id: int | None = typer.Option(None, "--item-id", "-i", help="ID of the item to delete"),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
 ) -> None:
     """Delete an item from Monday.com.
@@ -829,7 +831,8 @@ def delete_item(
         # Confirmation prompt (unless --force is used)
         if not force:
             typer.secho(
-                f"WARNING: This will permanently delete item '{item_name}' (ID: {item_id}) from board '{board_name}'!",
+                f"WARNING: This will permanently delete item '{item_name}'"
+                f" (ID: {item_id}) from board '{board_name}'!",
                 fg=typer.colors.YELLOW,
             )
             typer.secho("This action cannot be undone.", fg=typer.colors.RED)

@@ -1,7 +1,6 @@
 """Commands for managing Monday.com subitems."""
 
 import json
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -22,7 +21,7 @@ from monday_cli.utils.output import print_json
 
 @subitems_app.command("get")
 def get_subitem(
-    subitem_id: Optional[int] = typer.Option(None, "--subitem-id", help="Subitem ID"),
+    subitem_id: int | None = typer.Option(None, "--subitem-id", help="Subitem ID"),
 ) -> None:
     """Get a single subitem by ID.
 
@@ -66,10 +65,10 @@ def get_subitem(
 
 @subitems_app.command("list")
 def list_subitems(
-    item_id: Optional[int] = typer.Option(
+    item_id: int | None = typer.Option(
         None, "--item-id", "-i", help="ID of the parent item to list subitems from"
     ),
-    board_id: Optional[int] = typer.Option(
+    board_id: int | None = typer.Option(
         None, "--board-id", "-b", help="ID of the subitems board to list from"
     ),
     limit: int = typer.Option(
@@ -78,7 +77,7 @@ def list_subitems(
     all_pages: bool = typer.Option(
         False, "--all", "-a", help="Fetch all subitems across all pages (only used with --board-id)"
     ),
-    cursor: Optional[str] = typer.Option(
+    cursor: str | None = typer.Option(
         None, "--cursor", "-c", help="Pagination cursor for next page (only used with --board-id)"
     ),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
@@ -361,7 +360,8 @@ def list_subitems(
                 else:
                     if next_cursor:
                         typer.secho(
-                            f"\nShowing {len(all_subitems)} subitems. Use --cursor to get next page or --all to fetch all subitems.",
+                            f"\nShowing {len(all_subitems)} subitems. "
+                            "Use --cursor to get next page or --all to fetch all subitems.",
                             fg=typer.colors.BLUE,
                         )
                     else:
@@ -406,13 +406,11 @@ def list_subitems(
 
 @subitems_app.command("create")
 def create_subitem(
-    parent_item_id: Optional[int] = typer.Option(
+    parent_item_id: int | None = typer.Option(
         None, "--parent-item-id", "-p", help="ID of the parent item"
     ),
-    subitem_name: Optional[str] = typer.Option(
-        None, "--name", "-n", help="Name of the new subitem"
-    ),
-    column_values: Optional[str] = typer.Option(
+    subitem_name: str | None = typer.Option(None, "--name", "-n", help="Name of the new subitem"),
+    column_values: str | None = typer.Option(
         None,
         "--column-values",
         "-c",
@@ -424,7 +422,8 @@ def create_subitem(
     Example:
         monday subitems create --parent-item-id 1234567890 --name "New Subtask"
 
-        monday subitems create --parent-item-id 1234567890 --name "New Subtask" --column-values '{"status":{"index":1}}'
+        monday subitems create --parent-item-id 1234567890 --name "New Subtask" \
+            --column-values '{"status":{"index":1}}'
     """
     try:
         if parent_item_id is None:
@@ -499,7 +498,7 @@ def create_subitem(
 
 @subitems_app.command("list-columns")
 def list_columns(
-    subitem_id: Optional[int] = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem"),
+    subitem_id: int | None = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem"),
 ) -> None:
     """List all board columns for a subitem in an easy-to-use format.
 
@@ -601,7 +600,7 @@ def list_columns(
 
 @subitems_app.command("list-statuses")
 def list_statuses(
-    subitem_id: Optional[int] = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem"),
+    subitem_id: int | None = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem"),
 ) -> None:
     """List all available status columns and their options for a subitem's board.
 
@@ -715,11 +714,11 @@ def list_statuses(
 
 @subitems_app.command("update")
 def update_subitem(
-    subitem_id: Optional[int] = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem"),
-    title: Optional[str] = typer.Option(
+    subitem_id: int | None = typer.Option(None, "--subitem-id", "-s", help="ID of the subitem"),
+    title: str | None = typer.Option(
         None, "--title", "-t", help="Column title (e.g., 'Status', 'Github Issue Link')"
     ),
-    value: Optional[str] = typer.Option(None, "--value", "-v", help="Value to set"),
+    value: str | None = typer.Option(None, "--value", "-v", help="Value to set"),
 ) -> None:
     """Update a subitem column value using human-readable column titles.
 
@@ -740,7 +739,8 @@ def update_subitem(
                 fg=typer.colors.RED,
             )
             typer.secho(
-                'Example: monday subitems update --subitem-id 9999999999 --title "Status" --value "Ready For Work"',
+                "Example: monday subitems update --subitem-id 9999999999"
+                ' --title "Status" --value "Ready For Work"',
                 fg=typer.colors.BLUE,
             )
             raise typer.Exit(1)
@@ -751,7 +751,8 @@ def update_subitem(
                 fg=typer.colors.RED,
             )
             typer.secho(
-                'Example: monday subitems update --subitem-id 9999999999 --title "Status" --value "Ready For Work"',
+                "Example: monday subitems update --subitem-id 9999999999"
+                ' --title "Status" --value "Ready For Work"',
                 fg=typer.colors.BLUE,
             )
             raise typer.Exit(1)
@@ -762,7 +763,8 @@ def update_subitem(
                 fg=typer.colors.RED,
             )
             typer.secho(
-                'Example: monday subitems update --subitem-id 9999999999 --title "Status" --value "Ready For Work"',
+                "Example: monday subitems update --subitem-id 9999999999"
+                ' --title "Status" --value "Ready For Work"',
                 fg=typer.colors.BLUE,
             )
             raise typer.Exit(1)
@@ -927,7 +929,7 @@ def update_subitem(
 
 @subitems_app.command("delete")
 def delete_subitem(
-    subitem_id: Optional[int] = typer.Option(
+    subitem_id: int | None = typer.Option(
         None, "--subitem-id", "-s", help="ID of the subitem to delete"
     ),
     force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
@@ -973,7 +975,8 @@ def delete_subitem(
         # Confirmation prompt (unless --force is used)
         if not force:
             typer.secho(
-                f"WARNING: This will permanently delete subitem '{subitem_name}' (ID: {subitem_id}) from board '{board_name}'!",
+                f"WARNING: This will permanently delete subitem '{subitem_name}'"
+                f" (ID: {subitem_id}) from board '{board_name}'!",
                 fg=typer.colors.YELLOW,
             )
             typer.secho("This action cannot be undone.", fg=typer.colors.RED)

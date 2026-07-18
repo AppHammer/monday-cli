@@ -1,7 +1,5 @@
 """Commands for managing Monday.com boards."""
 
-from typing import Optional
-
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -14,18 +12,16 @@ from monday_cli.utils.output import print_json
 
 @boards_app.command("list")
 def list_boards(
-    state: Optional[str] = typer.Option(
+    state: str | None = typer.Option(
         "active",
         "--state",
         "-s",
         help="Board state: active, archived, deleted, all",
     ),
-    workspace_name: Optional[str] = typer.Option(
+    workspace_name: str | None = typer.Option(
         None, "--workspace-name", "-w", help="Filter by workspace name"
     ),
-    workspace_id: Optional[int] = typer.Option(
-        None, "--workspace-id", help="Filter by workspace ID"
-    ),
+    workspace_id: int | None = typer.Option(None, "--workspace-id", help="Filter by workspace ID"),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
 ) -> None:
     """List all boards available to you.

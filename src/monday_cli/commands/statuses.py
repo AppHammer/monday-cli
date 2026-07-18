@@ -1,7 +1,6 @@
 """Commands for managing Monday.com status columns."""
 
 import json
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -15,7 +14,7 @@ from monday_cli.utils.output import print_json
 
 @statuses_app.command("list")
 def list_statuses(
-    board_id: Optional[int] = typer.Option(None, "--board-id", "-b", help="ID of the board"),
+    board_id: int | None = typer.Option(None, "--board-id", "-b", help="ID of the board"),
     table: bool = typer.Option(False, "--table", "-t", help="Output as table instead of JSON"),
 ) -> None:
     """List all available status columns and their options for a board.

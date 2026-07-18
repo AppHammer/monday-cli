@@ -1,7 +1,6 @@
 """Commands for managing Monday.com documents."""
 
 import json
-from typing import Optional
 
 import typer
 
@@ -52,8 +51,9 @@ def _resolve_doc_column(client, item_id: int, column_name: str):
         raise typer.Exit(1)
 
     if target_column.get("type") != "doc":
+        col_type = target_column.get("type")
         typer.secho(
-            f"Error: Column '{column_name}' is not a doc column (type: {target_column.get('type')})",
+            f"Error: Column '{column_name}' is not a doc column (type: {col_type})",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
@@ -61,7 +61,7 @@ def _resolve_doc_column(client, item_id: int, column_name: str):
     return item, target_column["id"]
 
 
-def _get_existing_doc_object_id(item, column_id: str) -> Optional[str]:
+def _get_existing_doc_object_id(item, column_id: str) -> str | None:
     """Extract the doc object_id from an item's column values, or None.
 
     The objectId stored in the column value is the object_id in the docs API,
@@ -87,7 +87,7 @@ def _get_existing_doc_object_id(item, column_id: str) -> Optional[str]:
     return None
 
 
-def _resolve_doc_internal_id(client, object_id: str) -> Optional[str]:
+def _resolve_doc_internal_id(client, object_id: str) -> str | None:
     """Resolve a doc object_id to its internal doc id via the docs API."""
     result = client.execute_query(GET_DOC_BY_OBJECT_ID, {"objectIds": [str(object_id)]})
     docs = result.get("docs", [])
@@ -98,10 +98,10 @@ def _resolve_doc_internal_id(client, object_id: str) -> Optional[str]:
 
 @docs_app.command("get")
 def get_doc(
-    item_id: Optional[int] = typer.Option(
+    item_id: int | None = typer.Option(
         None, "--item-id", "-i", help="ID of the item containing the doc column"
     ),
-    column_name: Optional[str] = typer.Option(
+    column_name: str | None = typer.Option(
         None, "--column-name", "-n", help="Name of the doc column"
     ),
     raw: bool = typer.Option(
@@ -110,7 +110,8 @@ def get_doc(
         "--markdown",
         help=(
             "Print rendered Markdown as-is (human opt-out of the default JSON). "
-            "'--raw' is canonical; '--markdown' is an alias. Errors if Markdown export is unavailable."
+            "'--raw' is canonical; '--markdown' is an alias. "
+            "Errors if Markdown export is unavailable."
         ),
     ),
 ) -> None:
@@ -213,13 +214,13 @@ def get_doc(
 
 @docs_app.command("append")
 def append_doc(
-    item_id: Optional[int] = typer.Option(
+    item_id: int | None = typer.Option(
         None, "--item-id", "-i", help="ID of the item containing the doc column"
     ),
-    column_name: Optional[str] = typer.Option(
+    column_name: str | None = typer.Option(
         None, "--column-name", "-n", help="Name of the doc column"
     ),
-    content: Optional[str] = typer.Option(
+    content: str | None = typer.Option(
         None, "--content", "-c", help="Markdown content to append to the document"
     ),
 ) -> None:
@@ -326,13 +327,13 @@ def _delete_all_doc_blocks(client, internal_id: str) -> int:
 
 @docs_app.command("put")
 def put_doc(
-    item_id: Optional[int] = typer.Option(
+    item_id: int | None = typer.Option(
         None, "--item-id", "-i", help="ID of the item containing the doc column"
     ),
-    column_name: Optional[str] = typer.Option(
+    column_name: str | None = typer.Option(
         None, "--column-name", "-n", help="Name of the doc column"
     ),
-    content: Optional[str] = typer.Option(
+    content: str | None = typer.Option(
         None, "--content", "-c", help="Markdown content to write to the document"
     ),
 ) -> None:

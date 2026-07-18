@@ -35,5 +35,20 @@ DOC_CHUNK_MAX_BYTES = 20_000  # 20 KB per chunk
 # specifically for add_content_to_doc_from_markdown calls.
 DOC_WRITE_TIMEOUT = 120  # seconds
 
-# Maximum pages to iterate when clearing doc blocks (safety bound).
-DOC_CLEAR_MAX_PAGES = 1_000
+# Maximum loop iterations (page=1 re-fetches) when clearing doc blocks.
+# Each iteration fetches up to 100 blocks and issues up to 100 deletes.
+# This bounds the number of round-trips, not the total deletes; see
+# DOC_CLEAR_MAX_TOTAL_DELETES for the absolute delete cap.
+DOC_CLEAR_MAX_ITERATIONS = 1_000
+
+# Hard cap on the total number of blocks deleted in a single clear operation.
+# Prevents an infinite-loop scenario where a silently-failing delete allows the
+# loop to issue ~100,000 mutations before hitting DOC_CLEAR_MAX_ITERATIONS.
+# 100 blocks/iteration × 1000 iterations = 100,000; we cap at 10,000 to give
+# a clear error before anything pathological runs for hours.
+DOC_CLEAR_MAX_TOTAL_DELETES = 10_000
+
+# Maximum pages to scan when searching for a dedup sentinel in _doc_has_dedup_key.
+# This is a page-based (1-indexed) bound, distinct from the iteration-based
+# DOC_CLEAR_MAX_ITERATIONS used in _delete_all_doc_blocks.
+DOC_SCAN_MAX_PAGES = 1_000

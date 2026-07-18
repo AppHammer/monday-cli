@@ -24,7 +24,10 @@ from monday_cli.client.queries import (
 )
 from monday_cli.constants import (
     DOC_CHUNK_MAX_BYTES,
-    DOC_CLEAR_MAX_PAGES,
+    DOC_CLEAR_MAX_ITERATIONS,
+    DOC_CLEAR_MAX_TOTAL_DELETES,
+    DOC_SCAN_MAX_PAGES,
+    DOC_WRITE_TIMEOUT,
 )
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
 from monday_cli.utils.output import print_json
@@ -129,15 +132,20 @@ def _delete_all_doc_blocks(client: MondayGraphQLClient, internal_id: str) -> int
     while simultaneously deleting, we always fetch page=1 and repeat until
     the page comes back empty. Deletion shifts remaining blocks to the front,
     so re-fetching page=1 each time is the only reliable way to drain them all.
-    A safety bound (DOC_CLEAR_MAX_PAGES) prevents infinite loops on pathological
-    docs.
+
+    Two safety bounds prevent runaway loops:
+    - DOC_CLEAR_MAX_ITERATIONS: caps the number of page=1 re-fetches (loop
+      iterations), each of which issues up to 100 deletes.
+    - DOC_CLEAR_MAX_TOTAL_DELETES: caps the absolute number of block deletes.
+      If this limit is hit it means deletes are silently failing (block remains
+      after delete); an error is raised instead of looping toward ~100k mutations.
     """
     deleted = 0
-    pages_fetched = 0
+    iterations = 0
     while True:
-        if pages_fetched >= DOC_CLEAR_MAX_PAGES:
+        if iterations >= DOC_CLEAR_MAX_ITERATIONS:
             typer.secho(
-                f"Warning: stopped clearing after {pages_fetched} pages "
+                f"Warning: stopped clearing after {iterations} iterations "
                 f"({deleted} blocks deleted). The document may still have remaining blocks.",
                 err=True,
                 fg=typer.colors.YELLOW,
@@ -146,7 +154,7 @@ def _delete_all_doc_blocks(client: MondayGraphQLClient, internal_id: str) -> int
         doc_result = client.execute_query(
             GET_DOC_BLOCKS, {"docIds": [internal_id], "limit": 100, "page": 1}
         )
-        pages_fetched += 1
+        iterations += 1
         docs = doc_result.get("docs", [])
         if not docs:
             break
@@ -154,9 +162,45 @@ def _delete_all_doc_blocks(client: MondayGraphQLClient, internal_id: str) -> int
         if not blocks:
             break
         for block in blocks:
+            if deleted >= DOC_CLEAR_MAX_TOTAL_DELETES:
+                raise MondayAPIError(
+                    f"Aborting: exceeded {DOC_CLEAR_MAX_TOTAL_DELETES} total block deletes. "
+                    "Blocks may be silently failing to delete. "
+                    "Check the document state and retry with `monday docs clear`."
+                )
             client.execute_mutation(DELETE_DOC_BLOCK, {"blockId": block["id"]})
             deleted += 1
     return deleted
+
+
+def _byte_split_line(line: str, max_bytes: int) -> list[str]:
+    """Split a single line that exceeds max_bytes into pieces on safe UTF-8 char boundaries.
+
+    Never splits a multibyte character; each returned piece is at most max_bytes
+    UTF-8 bytes. Called only when a single line is already known to exceed max_bytes.
+    """
+    pieces: list[str] = []
+    encoded = line.encode("utf-8")
+    start = 0
+    total = len(encoded)
+    while start < total:
+        end = start + max_bytes
+        if end >= total:
+            pieces.append(encoded[start:].decode("utf-8"))
+            break
+        # Walk back from `end` to find a safe codepoint boundary.
+        # UTF-8 continuation bytes have the pattern 10xxxxxx (0x80–0xBF).
+        while end > start and (encoded[end] & 0xC0) == 0x80:
+            end -= 1
+        if end == start:
+            # Degenerate: a single codepoint > max_bytes (extremely rare).
+            # Advance past it to avoid an infinite loop.
+            end = start + 1
+            while end < total and (encoded[end] & 0xC0) == 0x80:
+                end += 1
+        pieces.append(encoded[start:end].decode("utf-8"))
+        start = end
+    return pieces
 
 
 def _split_markdown_chunks(markdown: str, max_bytes: int = DOC_CHUNK_MAX_BYTES) -> list[str]:
@@ -164,8 +208,9 @@ def _split_markdown_chunks(markdown: str, max_bytes: int = DOC_CHUNK_MAX_BYTES) 
 
     US-0005-01: Splits on blank-line paragraph boundaries so a chunk never
     cuts mid-block. Paragraphs that are individually larger than max_bytes
-    are hard-split (mid-block) as a last resort, but this should not occur
-    in practice for normal FRD/prose content.
+    are hard-split by lines first, and if a single line still exceeds max_bytes
+    it is byte-split on safe UTF-8 character boundaries. No chunk ever exceeds
+    max_bytes bytes.
 
     Returns a list of non-empty chunk strings in source order.
     """
@@ -197,27 +242,40 @@ def _split_markdown_chunks(markdown: str, max_bytes: int = DOC_CHUNK_MAX_BYTES) 
     current_chunk_parts: list[str] = []
     current_chunk_bytes = 0
 
+    def _flush() -> None:
+        nonlocal current_chunk_parts, current_chunk_bytes
+        joined = "".join(current_chunk_parts).strip()
+        if joined:
+            chunks.append(joined)
+        current_chunk_parts = []
+        current_chunk_bytes = 0
+
+    def _emit_piece(piece: str) -> None:
+        """Add a piece (guaranteed <= max_bytes) to the current chunk, flushing if needed."""
+        nonlocal current_chunk_bytes
+        piece_bytes = len(piece.encode("utf-8"))
+        if current_chunk_bytes + piece_bytes > max_bytes and current_chunk_parts:
+            _flush()
+        current_chunk_parts.append(piece)
+        current_chunk_bytes += piece_bytes
+
     for para in paragraphs:
         para_bytes = len(para.encode("utf-8"))
         if para_bytes == 0:
             continue
         if current_chunk_bytes + para_bytes > max_bytes and current_chunk_parts:
-            # Flush current chunk
-            chunks.append("".join(current_chunk_parts).strip())
-            current_chunk_parts = []
-            current_chunk_bytes = 0
+            _flush()
 
         if para_bytes > max_bytes:
-            # Oversized single paragraph — hard-split by lines as last resort
-            lines = para.splitlines(keepends=True)
-            for line in lines:
+            # Oversized paragraph — hard-split by lines first
+            for line in para.splitlines(keepends=True):
                 line_bytes = len(line.encode("utf-8"))
-                if current_chunk_bytes + line_bytes > max_bytes and current_chunk_parts:
-                    chunks.append("".join(current_chunk_parts).strip())
-                    current_chunk_parts = []
-                    current_chunk_bytes = 0
-                current_chunk_parts.append(line)
-                current_chunk_bytes += line_bytes
+                if line_bytes > max_bytes:
+                    # Single line exceeds limit — byte-split on UTF-8 boundaries
+                    for piece in _byte_split_line(line, max_bytes):
+                        _emit_piece(piece)
+                else:
+                    _emit_piece(line)
         else:
             current_chunk_parts.append(para)
             current_chunk_bytes += para_bytes
@@ -239,8 +297,9 @@ def _write_markdown_chunked(
 
     US-0005-01 + US-0005-04: Splits the markdown into chunks each within
     DOC_CHUNK_MAX_BYTES and issues add_content_to_doc_from_markdown calls
-    strictly in source order. Each call uses DOC_WRITE_TIMEOUT to survive
-    large writes without timing out.
+    strictly in source order. Each call uses DOC_WRITE_TIMEOUT (120 s) instead
+    of the global REQUEST_TIMEOUT (30 s) to survive large writes that take
+    longer than the default timeout on Monday.com's write path.
     """
     chunks = _split_markdown_chunks(markdown)
     if not chunks:
@@ -250,6 +309,7 @@ def _write_markdown_chunked(
         md_result = client.execute_mutation(
             ADD_CONTENT_FROM_MARKDOWN,
             {"docId": internal_id, "markdown": chunk},
+            timeout=DOC_WRITE_TIMEOUT,
         )
         result_data = md_result.get("add_content_to_doc_from_markdown", {})
         if not result_data.get("success"):
@@ -258,8 +318,18 @@ def _write_markdown_chunked(
 
 
 def _compute_dedup_key(markdown: str) -> str:
-    """Compute a stable SHA-256 dedup key for append idempotency (US-0005-03)."""
-    return hashlib.sha256(markdown.encode("utf-8")).hexdigest()
+    """Compute a stable SHA-256 dedup key for append idempotency (US-0005-03).
+
+    Normalization contract: content is stripped of leading/trailing whitespace
+    and line endings are normalized to '\\n' before hashing. This ensures that
+    a retry differing only in trailing whitespace or CRLF vs LF line endings
+    produces the same key and is correctly recognised as a duplicate.
+
+    Two appends are considered identical if and only if their normalized content
+    strings are equal.
+    """
+    normalized = markdown.strip().replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _make_dedup_sentinel(key: str) -> str:
@@ -276,7 +346,7 @@ def _doc_has_dedup_key(client: MondayGraphQLClient, internal_id: str, key: str) 
     sentinel = _make_dedup_sentinel(key)
     page = 1
     while True:
-        if page > DOC_CLEAR_MAX_PAGES:
+        if page > DOC_SCAN_MAX_PAGES:
             break
         doc_result = client.execute_query(
             GET_DOC_BLOCKS, {"docIds": [internal_id], "limit": 100, "page": page}
@@ -380,17 +450,33 @@ def get_doc(
             # Default path: emit deterministic, lossless JSON {markdown, blocks}
             markdown_value = export.get("markdown") if export_success else None
 
-            # Always fetch blocks for lossless output
-            doc_result = client.execute_query(GET_DOC_BLOCKS, {"docIds": [internal_id]})
-            docs = doc_result.get("docs", [])
-            if not docs:
-                typer.secho(
-                    f"No content found for document {internal_id}",
-                    fg=typer.colors.YELLOW,
+            # Fetch ALL blocks via pagination to ensure the output is genuinely
+            # lossless for large documents (server default without limit/page is
+            # ~25 blocks, which truncates docs enabled by this PR's chunking).
+            all_blocks: list[dict[str, Any]] = []
+            page = 1
+            while True:
+                doc_result = client.execute_query(
+                    GET_DOC_BLOCKS, {"docIds": [internal_id], "limit": 100, "page": page}
                 )
-                raise typer.Exit(1)
-            blocks = docs[0].get("blocks", [])
-            print_json({"markdown": markdown_value, "blocks": blocks})
+                docs = doc_result.get("docs", [])
+                if not docs:
+                    if page == 1:
+                        typer.secho(
+                            f"No content found for document {internal_id}",
+                            fg=typer.colors.YELLOW,
+                        )
+                        raise typer.Exit(1)
+                    break
+                page_blocks = docs[0].get("blocks", [])
+                if not page_blocks:
+                    break
+                all_blocks.extend(page_blocks)
+                if len(page_blocks) < 100:
+                    # Fewer than a full page returned — we've reached the end
+                    break
+                page += 1
+            print_json({"markdown": markdown_value, "blocks": all_blocks})
 
     except typer.Exit:
         raise
@@ -427,7 +513,21 @@ def append_doc(
 
     Creates the document if it does not exist, then appends the Markdown content.
     Append is idempotent: retrying with the same content (e.g. after a lost
-    acknowledgement) will not duplicate the content.
+    acknowledgement) will not duplicate the content (US-0005-03).
+
+    Dedup sentinel side effects:
+    - Each append prepends a '[monday-cli-dedup:HEX]' marker block. This marker
+      is visible in `docs get` output and in the raw Markdown from `docs get --raw`.
+    - Round-trip reads: if you read a doc with `docs get --raw`, edit it, and
+      write it back with `docs put`, the sentinel from the previous append is
+      included in the content. A subsequent `docs append` may find a phantom
+      sentinel (harmless — it occupies one block but does not suppress the write
+      because `put` content hashes differ from `append` content hashes).
+    - Content forgery: any text containing '[monday-cli-dedup:HEX]' (64 hex
+      chars) written into a doc can cause a future `docs append` whose SHA-256
+      matches that key to be silently skipped. Accidental collision is negligible
+      (SHA-256); intentional forgery is trivially possible. Do not rely on dedup
+      as a security mechanism.
 
     Example:
         monday docs append --item-id 1234567890 --column-name "Monday Doc" --content "# Hello"
@@ -538,6 +638,16 @@ def put_doc(
     Large documents are automatically split into chunks to avoid API cell-size
     limits (CellLimitExceededException). The size preflight runs BEFORE any
     destructive clear so a doomed write never corrupts an existing document.
+
+    Atomicity note (existing-doc path): the clear and write are two separate
+    API operations. If a chunk write fails after the clear has completed, the
+    document will be left partially written. There is no automatic rollback for
+    this path. To recover, run:
+
+        monday docs clear --item-id <id> --column-name <col> --force
+
+    and then retry the put. For a fresh (empty) cell, a write failure triggers
+    automatic cleanup of the orphaned doc object so the column stays writable.
 
     Example:
         monday docs put --item-id 1234567890 --column-name "FRD" --content "# Hello\\n\\nWorld"

@@ -20,15 +20,39 @@ from monday_cli.cli import app
 from monday_cli.commands.docs import (
     _DEDUP_SENTINEL_PREFIX,
     _DEDUP_SENTINEL_SUFFIX,
+    _byte_split_line,
     _compute_dedup_key,
     _delete_all_doc_blocks,
     _doc_has_dedup_key,
     _make_dedup_sentinel,
     _split_markdown_chunks,
 )
-from monday_cli.constants import DOC_CHUNK_MAX_BYTES
+from monday_cli.constants import (
+    DOC_CHUNK_MAX_BYTES,
+    DOC_CLEAR_MAX_ITERATIONS,
+    DOC_CLEAR_MAX_TOTAL_DELETES,
+    DOC_SCAN_MAX_PAGES,
+)
 
 runner = CliRunner()
+
+
+# ---------------------------------------------------------------------------
+# Constants sanity checks (NIT 1)
+# ---------------------------------------------------------------------------
+
+
+class TestConstants:
+    """Verify that the renamed/split constants exist and are semantically distinct."""
+
+    def test_clear_iterations_and_scan_pages_are_distinct_names(self) -> None:
+        """DOC_CLEAR_MAX_ITERATIONS (delete loop) and DOC_SCAN_MAX_PAGES (dedup scan) exist."""
+        assert DOC_CLEAR_MAX_ITERATIONS > 0
+        assert DOC_SCAN_MAX_PAGES > 0
+
+    def test_total_delete_cap_is_less_than_iteration_times_page_size(self) -> None:
+        """DOC_CLEAR_MAX_TOTAL_DELETES provides a tighter bound than iterations * 100."""
+        assert DOC_CLEAR_MAX_TOTAL_DELETES < DOC_CLEAR_MAX_ITERATIONS * 100
 
 
 def _extract_json_from_output(stdout: str) -> Any:
@@ -157,15 +181,39 @@ class TestSplitMarkdownChunks:
             last_pos = pos
 
     def test_no_chunk_exceeds_max_bytes(self) -> None:
-        # Build a ~60KB document of many paragraphs and verify each chunk fits
+        # Build a ~60KB document of many normal paragraphs and verify each chunk fits
         paragraphs = [f"Paragraph {i}: " + ("x" * 200) for i in range(100)]
         md = "\n\n".join(paragraphs)
         max_b = DOC_CHUNK_MAX_BYTES
         chunks = _split_markdown_chunks(md, max_bytes=max_b)
         for idx, chunk in enumerate(chunks):
             size = len(chunk.encode("utf-8"))
-            # Allow slight overage only for single-paragraph edge cases
-            assert size <= max_b * 2, f"Chunk {idx} is {size} bytes, exceeds 2x limit"
+            assert size <= max_b, f"Chunk {idx} is {size} bytes, exceeds max_bytes={max_b}"
+
+    def test_single_line_exceeding_max_bytes_is_byte_split(self) -> None:
+        """BLOCKER 2: a single line > max_bytes must never produce an over-limit chunk."""
+        max_b = 20_000
+        # A 25001-byte single-line string with no internal newlines
+        big_line = "x" * 25_001
+        chunks = _split_markdown_chunks(big_line, max_bytes=max_b)
+        assert len(chunks) >= 2, "Expected the oversized single line to be split"
+        for idx, chunk in enumerate(chunks):
+            size = len(chunk.encode("utf-8"))
+            assert size <= max_b, f"Chunk {idx} is {size} bytes, exceeds max_bytes={max_b}"
+        # All content must be present (no bytes dropped)
+        assert "".join(chunks) == big_line
+
+    def test_single_line_multibyte_utf8_is_byte_split_safely(self) -> None:
+        """Byte-split must not split a multibyte UTF-8 character across chunk boundaries."""
+        max_b = 10
+        # Each emoji is 4 bytes in UTF-8; 3 emojis = 12 bytes → must split into 2 chunks
+        emoji_line = "\U0001f600" * 3  # 😀😀😀 = 12 UTF-8 bytes
+        pieces = _byte_split_line(emoji_line, max_bytes=max_b)
+        for piece in pieces:
+            assert len(piece.encode("utf-8")) <= max_b
+            # Each piece must be valid UTF-8 (round-trip check)
+            assert piece.encode("utf-8").decode("utf-8") == piece
+        assert "".join(pieces) == emoji_line
 
     def test_large_content_produces_multiple_chunks(self) -> None:
         # 200 paragraphs of 250 bytes each = ~50KB; must produce multiple chunks
@@ -248,6 +296,33 @@ class TestDeleteAllDocBlocks:
         assert deleted == 0
         assert client.execute_mutation.call_count == 0
 
+    def test_raises_when_total_delete_cap_exceeded(self) -> None:
+        """SUGGESTION 1: MondayAPIError raised when total-delete cap is hit."""
+        import pytest
+
+        from monday_cli.utils.error_handler import MondayAPIError
+
+        # Always return the same blocks so deletes never reduce the count
+        always_blocks = {
+            "docs": [
+                {
+                    "id": "77",
+                    "blocks": [
+                        {"id": f"b{i}", "type": "normal_text", "content": "{}"} for i in range(100)
+                    ],
+                }
+            ]
+        }
+        client = MagicMock()
+        client.execute_query.return_value = always_blocks
+        client.execute_mutation.return_value = {"delete_doc_block": {"id": "x"}}
+
+        with pytest.raises(MondayAPIError, match="exceeded"):
+            _delete_all_doc_blocks(client, "77")
+
+        # Should have hit the cap, not the iteration cap
+        assert client.execute_mutation.call_count == DOC_CLEAR_MAX_TOTAL_DELETES
+
     def test_handles_no_docs_response(self) -> None:
         client = MagicMock()
         client.execute_query.return_value = {"docs": []}
@@ -303,7 +378,9 @@ class TestDedupKeyHelpers:
     def test_dedup_key_is_sha256_hex(self) -> None:
         content = "Hello World"
         key = _compute_dedup_key(content)
-        expected = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        # Key is computed over stripped+normalized form
+        normalized = content.strip().replace("\r\n", "\n").replace("\r", "\n")
+        expected = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         assert key == expected
 
     def test_same_content_same_key(self) -> None:
@@ -314,6 +391,15 @@ class TestDedupKeyHelpers:
         key1 = _compute_dedup_key("hello")
         key2 = _compute_dedup_key("world")
         assert key1 != key2
+
+    def test_trailing_whitespace_normalized_to_same_key(self) -> None:
+        """SUGGESTION 4: trailing whitespace difference must not create a different key."""
+        assert _compute_dedup_key("hello\n") == _compute_dedup_key("hello")
+        assert _compute_dedup_key("  hello  ") == _compute_dedup_key("hello")
+
+    def test_crlf_normalized_to_same_key_as_lf(self) -> None:
+        """SUGGESTION 4: CRLF vs LF should not create different dedup keys."""
+        assert _compute_dedup_key("line1\r\nline2") == _compute_dedup_key("line1\nline2")
 
     def test_make_dedup_sentinel_contains_prefix_and_key(self) -> None:
         key = _compute_dedup_key("test")

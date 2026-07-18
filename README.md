@@ -704,6 +704,68 @@ ruff check src/ tests/
 mypy src/
 ```
 
+## Release Process (Conventional Commits)
+
+monday-cli uses **Conventional Commits** as the source of truth for all versioning and changelog generation. Every commit to `main` (via PR) must conform to the spec, and the release pipeline derives the next version automatically from commit types.
+
+### Commit Message Format
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+| Type | Bump | Example |
+|------|------|---------|
+| `feat` | minor (`0.x.0`) | `feat: add --all flag to items list` |
+| `fix` | patch (`0.0.x`) | `fix: handle 429 response in GraphQL client` |
+| `perf` | patch | `perf: batch subitem lookups to reduce API calls` |
+| `feat!` or `BREAKING CHANGE:` in footer | major (`x.0.0`) | `feat!: rename --item to --item-id` |
+| `chore` / `ci` / `docs` / `build` / `style` / `test` / `refactor` | none | `chore: update dev dependencies` |
+
+A commit-lint check runs on every PR and **fails the PR** if any commit message (or PR title, which becomes the squash-commit subject) does not conform.
+
+### Automated Release Flow
+
+On merge to `main`, the following happens automatically:
+
+1. `tests.yml` runs the unit test suite (and future integration tests when FR-0002 lands).
+2. `semantic-release.yml` runs `python-semantic-release version`, which:
+   - Computes the next version from commits since the last tag (`feat` → minor, `fix`/`perf` → patch, breaking → major).
+   - **No-op path**: if there are no releasable commits (`feat`/`fix`/`perf`/breaking), the pipeline exits cleanly with no tag and no Release.
+   - Updates `version` in `pyproject.toml` (the single source of version truth).
+   - Prepends a new entry to `CHANGELOG.md`.
+   - Commits both files (the commit message includes `[skip ci]` to prevent an infinite loop).
+   - Creates an annotated git tag `v{version}` and pushes it to `main`.
+3. The tag push triggers `release.yml`, which:
+   - Builds the standalone Linux binary via `build/build_binary.py` (PyInstaller).
+   - Verifies `dist/monday version` reports the released version.
+   - Creates a SHA256 checksum.
+   - Uploads `monday-linux` + `monday-linux.sha256` to the GitHub Release.
+
+**Out of scope:** PyPI / package-index publishing. Releases are distributed as binary assets only.
+
+### Release Bot Token Setup
+
+The semantic-release workflow needs to push to a branch-protected `main`, which the default `GITHUB_TOKEN` cannot do. Set up a dedicated token:
+
+1. Create a **Personal Access Token (classic)** or **GitHub App token** with `Contents: write` scope on this repository.
+2. Add it as a repository secret named **`GH_TOKEN`** (Settings → Secrets and variables → Actions → New repository secret).
+3. Never push tags by hand — the release pipeline creates and pushes all tags.
+
+### Files Managed by the Release Pipeline
+
+> **Do not edit these files manually.** They are now managed by `python-semantic-release`.
+
+| File | Managed by |
+|------|------------|
+| `pyproject.toml` → `[project].version` | `python-semantic-release` (on release) |
+| `CHANGELOG.md` | `python-semantic-release` (on release) |
+| Git tags `v*.*.*` | `python-semantic-release` (on release) |
+
 ## Troubleshooting
 
 ### "Invalid API token" error

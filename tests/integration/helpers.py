@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import traceback
 from typing import Any
 
 from typer.testing import CliRunner
@@ -57,19 +58,27 @@ def _extract_json(stdout: str) -> Any:
     raise CliOutputError(f"Could not locate a JSON payload in CLI output:\n{stdout}")
 
 
-def _invoke_in_process(args: tuple[str, ...]) -> tuple[int, str]:
+def _invoke_in_process(args: tuple[str, ...]) -> tuple[int, str, BaseException | None]:
     result = _runner.invoke(app, list(args))
-    return result.exit_code, result.stdout
+    return result.exit_code, result.stdout, result.exception
 
 
-def _invoke_binary(binary: str, args: tuple[str, ...]) -> tuple[int, str]:
+def _invoke_binary(binary: str, args: tuple[str, ...]) -> tuple[int, str, BaseException | None]:
     completed = subprocess.run(
         [binary, *args],
         capture_output=True,
         text=True,
         env=os.environ.copy(),
     )
-    return completed.returncode, completed.stdout
+    return completed.returncode, completed.stdout, None
+
+
+def _format_exception(exc: BaseException) -> str:
+    """Render a CliRunner-captured exception (with traceback, if any) for a failure message."""
+    if exc.__traceback__ is not None:
+        formatted = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        return f"\n{formatted}"
+    return f" {exc!r}"
 
 
 def run_cli(*args: str, raw: bool = False, expect_error: bool = False) -> Any:
@@ -94,14 +103,16 @@ def run_cli(*args: str, raw: bool = False, expect_error: bool = False) -> Any:
     """
     binary = os.environ.get("MONDAY_CLI_BIN")
     if binary:
-        exit_code, stdout = _invoke_binary(binary, args)
+        exit_code, stdout, exception = _invoke_binary(binary, args)
     else:
-        exit_code, stdout = _invoke_in_process(args)
+        exit_code, stdout, exception = _invoke_in_process(args)
 
     if not expect_error:
-        assert (
-            exit_code == 0
-        ), f"monday {' '.join(args)} exited {exit_code}, expected 0.\nOutput:\n{stdout}"
+        exception_detail = f"\nException:{_format_exception(exception)}" if exception else ""
+        assert exit_code == 0, (
+            f"monday {' '.join(args)} exited {exit_code}, expected 0.\n"
+            f"Output:\n{stdout}{exception_detail}"
+        )
     elif exit_code != 0:
         # Error paths in this CLI print human messages, not JSON -- nothing
         # to parse, so hand back the raw text regardless of `raw`.

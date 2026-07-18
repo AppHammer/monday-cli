@@ -117,4 +117,14 @@ if __name__ == "__main__":
 
 
 # Import command modules to register commands (after all functions are defined)
-from monday_cli.commands import boards, docs, groups, items, statuses, subitems, updates, workspaces  # noqa: F401, E402
+from monday_cli.commands import (  # noqa: F401, E402
+    boards,
+    docs,
+    groups,
+    guide,
+    items,
+    statuses,
+    subitems,
+    updates,
+    workspaces,
+)

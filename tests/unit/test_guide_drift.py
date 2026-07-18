@@ -10,6 +10,7 @@ automatically, and removing it from the output would fail this test.
 """
 
 import json
+import re
 
 from typer.testing import CliRunner
 
@@ -31,20 +32,34 @@ def _guide_json() -> dict:
     return json.loads(result.stdout)
 
 
+def _assert_whole_token_in_prose(out: str, expected: str) -> None:
+    """Assert `expected` appears in `out` as a whole command token.
+
+    A plain substring check would false-pass a dropped `list` command because
+    `items list` is itself a substring of `items list-columns` (and similarly
+    for other `list`-prefixed sibling commands, or `items` inside `subitems`).
+    Require that the characters immediately before and after the match are not
+    word/hyphen characters, so a same-prefixed sibling command or group can no
+    longer stand in for the real one.
+    """
+    pattern = r"(?<![\w-])" + re.escape(expected) + r"(?![\w-])"
+    assert re.search(pattern, out), f"missing '{expected}' in guide"
+
+
 def test_every_command_appears_in_guide_prose() -> None:
     model = build_app_model()
     out = _guide_prose()
 
     # Top-level meta-commands.
     for command in model.commands:
-        assert f"monday {command.name}" in out, f"missing top-level '{command.name}' in guide"
+        _assert_whole_token_in_prose(out, f"monday {command.name}")
 
     # Resource groups and their sub-commands.
     for group in model.groups:
-        assert group.name in out, f"missing group '{group.name}' in guide"
+        _assert_whole_token_in_prose(out, group.name)
         for command in group.commands:
             expected = f"monday {group.name} {command.name}"
-            assert expected in out, f"missing '{expected}' in guide"
+            _assert_whole_token_in_prose(out, expected)
 
 
 def test_every_command_appears_in_guide_json() -> None:

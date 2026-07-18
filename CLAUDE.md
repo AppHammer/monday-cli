@@ -47,6 +47,16 @@ pytest                                   # full suite (coverage is on by default
 pytest tests/unit                        # only unit tests
 pytest tests/unit/test_foo.py::test_bar  # a single test
 
+# Live integration tests (tests/integration, marked `integration`) — run the CLI
+# end-to-end against the live API and the TEST board 18422673411. They skip
+# cleanly when MONDAY_API_TOKEN is unset and tear down every artifact even on
+# failure. The shared harness (conftest.py/helpers.py) hard-fails if the resolved
+# board is the PM board 18422673287. CI runs them per-PR via
+# .github/workflows/integration.yml (secret-gated + serialized).
+pytest -m integration                    # only integration tests
+pytest tests/integration -m integration  # same, scoped to the folder
+MONDAY_TEST_BOARD_ID=<id> pytest -m integration  # override the test board (never the PM board)
+
 # Lint / format / type-check
 ruff check src tests
 black src tests

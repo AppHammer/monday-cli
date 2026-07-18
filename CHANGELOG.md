@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — FR-0004
+
+> **Maintainer note:** The `docs get` default output change (Markdown → JSON) is a
+> **breaking change** that justifies at least a **minor version bump** pre-1.0
+> (i.e. 0.5.0 → 0.6.0). Please confirm the version number before tagging a release.
+
+### Added
+
+- `monday docs get --raw` / `--markdown` flag: prints rendered Markdown directly to
+  stdout for human consumption. `--raw` is the canonical spelling; `--markdown` is a
+  discoverable alias. Errors loudly to stderr and exits non-zero when Markdown export
+  is unavailable (no silent fallback to block JSON).
+
+### Changed
+
+- **BREAKING:** `monday docs get` default output changed from bare Markdown to a
+  deterministic, lossless JSON object `{"markdown": <string|null>, "blocks": [...]}`.
+  Both keys are always present: `markdown` is the rendered Markdown string when export
+  succeeds, or `null` when unsupported; `blocks` is always the raw block JSON so the
+  payload is lossless even without Markdown export support. The previous silent
+  Markdown-vs-JSON shape switch (depending on whether Markdown export was supported by
+  the document) has been removed.
+  - **Migration path:** users who relied on the previous bare-Markdown default output
+    should add `--raw` (or the alias `--markdown`) to their invocations:
+    ```bash
+    # Before (0.5.x and earlier)
+    monday docs get --item-id 123 --column-name "Notes"
+    # After (0.6.0+) — same Markdown output on stdout
+    monday docs get --item-id 123 --column-name "Notes" --raw
+    ```
+
 ## [0.5.0] - 2026-02-17
 
 ### Added

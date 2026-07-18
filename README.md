@@ -524,17 +524,29 @@ monday docs create --item-id 1234567890 --column-name "Notes" --content "Meeting
 ```
 
 **Get document content:**
+
+> **Breaking change (v0.6.0):** `monday docs get` now emits a deterministic JSON object
+> `{"markdown": ..., "blocks": [...]}` by default. The previous Markdown-by-default behaviour
+> is now behind `--raw` / `--markdown`. Update any scripts that relied on the old bare-Markdown
+> output to use `monday docs get --raw` instead.
+
 ```bash
-monday docs get --item-id <ITEM_ID> --column-name <COLUMN_NAME>
+monday docs get --item-id <ITEM_ID> --column-name <COLUMN_NAME> [OPTIONS]
 
 Options:
   -i, --item-id TEXT      Item ID (required)
   -n, --column-name TEXT  Doc column name (required)
+  --raw, --markdown       Aliases for the same flag. Print rendered Markdown to stdout
+                          (human opt-out of the default JSON). '--raw' is the canonical
+                          spelling; '--markdown' is a discoverable alias — both produce
+                          identical output. Errors if Markdown export is unavailable.
 ```
 
-Retrieves all blocks from a document, including their type and content.
+Returns a lossless JSON object with two keys:
+- `markdown`: rendered Markdown string, or `null` if Markdown export is unsupported
+- `blocks`: raw block JSON (always populated for documents with content)
 
-Example:
+Example (default — machine-readable JSON):
 ```bash
 monday docs get --item-id 1234567890 --column-name "Monday Doc"
 ```
@@ -542,7 +554,7 @@ monday docs get --item-id 1234567890 --column-name "Monday Doc"
 Output:
 ```json
 {
-  "id": "123456",
+  "markdown": "# My Document\n\nDocument content here.",
   "blocks": [
     {
       "id": "block-1",
@@ -551,6 +563,13 @@ Output:
     }
   ]
 }
+```
+
+Example (human-readable Markdown):
+```bash
+monday docs get --item-id 1234567890 --column-name "Monday Doc" --raw
+# or equivalently:
+monday docs get --item-id 1234567890 --column-name "Monday Doc" --markdown
 ```
 
 ### Other Commands
@@ -663,6 +682,7 @@ monday --debug items get --item-id 1234567890
 |----------|-------------|---------|
 | `MONDAY_API_TOKEN` | Monday.com API token (required) | - |
 | `MONDAY_API_URL` | Monday.com API endpoint | https://api.monday.com/v2 |
+| `MONDAY_TEST_BOARD_ID` | Board id used by the live integration suite (`tests/integration`) | 18422673411 |
 | `LOG_LEVEL` | Logging level | INFO |
 | `RETRY_MAX_ATTEMPTS` | Maximum retry attempts | 3 |
 | `RETRY_BACKOFF_FACTOR` | Retry backoff multiplier | 2.0 |
@@ -688,8 +708,36 @@ monday --debug items get --item-id 1234567890
 ### Run Tests
 
 ```bash
-pytest
+pytest                       # full suite (unit + collectible integration)
+pytest tests/unit            # fast, offline unit tests only
 ```
+
+#### Live integration tests
+
+`tests/integration/` exercises the CLI end-to-end against the **live Monday.com
+API and the dedicated scratch test board `18422673411`**. They are marked with
+the `integration` marker and are safe to re-run: every artifact they create is
+run-scoped and torn down automatically, even on failure.
+
+```bash
+# Requires a token; targets the test board by default.
+export MONDAY_API_TOKEN="your_api_token_here"
+pytest tests/integration -m integration
+```
+
+- When `MONDAY_API_TOKEN` is unset, the suite **skips cleanly** (no failures).
+- The board is pinned to `18422673411` and can be overridden with
+  `MONDAY_TEST_BOARD_ID`. As a safety rail the harness **hard-fails** if the
+  board ever resolves to the project-management board `18422673287` — never run
+  destructive tests against it.
+
+**CI:** `.github/workflows/integration.yml` runs this suite on every pull
+request, serialized through a single concurrency group so overlapping PRs queue
+instead of colliding on the shared board. It is gated on the `MONDAY_API_TOKEN`
+**repository secret** — forked PRs (which cannot read secrets) are skipped and
+never fail, and same-repo runs without the secret exit cleanly. Configure the
+secret under **Settings → Secrets and variables → Actions**; optionally set a
+`MONDAY_TEST_BOARD_ID` repository variable to override the default board.
 
 ### Code Quality
 

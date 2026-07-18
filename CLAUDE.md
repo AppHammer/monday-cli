@@ -116,6 +116,7 @@ Every commit must follow **Conventional Commits**:
 | `fix` / `perf` | patch (`0.0.x`) | Included in release |
 | `feat!` or `BREAKING CHANGE:` | major (`x.0.0`) | Included in release |
 | `chore` / `ci` / `docs` / `build` / `style` / `test` / `refactor` | none | No release triggered |
+| `revert` | none | No release triggered |
 
 A PR CI check (`commit-lint.yml`) **blocks the PR** if commits or the PR title don't conform.
 

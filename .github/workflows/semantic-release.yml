@@ -6,19 +6,16 @@ name: Semantic Release
 # Design decisions / hazard mitigations documented here:
 #
 # 1. GATE ON GREEN TESTS
-#    The release job requires the "Tests" workflow to pass first (see `needs`
-#    in future when we can use workflow_run, or via branch protection rules).
-#    For now we re-run the test suite as a required step before releasing, so
-#    we never publish a red build. Once FR-0002 integration tests land on main,
-#    add integration.yml as an additional gate.
+#    The release job requires the "test" job to pass first. The test job re-runs
+#    the unit test suite so we never publish a red build. Once FR-0002 integration
+#    tests land on main, add integration.yml as an additional gate at the
+#    branch-protection level (no workflow change required for that).
 #
-# 2. BOT-PUSH LOOP PREVENTION
-#    python-semantic-release commits "[skip ci]" or uses a dedicated GH_TOKEN
-#    (not GITHUB_TOKEN) to push the version-bump commit + tag to main.
-#    The workflow uses a concurrency group so concurrent pushes (e.g. rapid
-#    merges) are serialized and the previous run cancelled if superseded.
-#    The "[skip ci]" in PSR's commit message prevents this workflow from
-#    re-firing on the bump commit.
+# 2. BOT-PUSH LOOP PREVENTION (two independent guards)
+#    a. paths-ignore on pyproject.toml + CHANGELOG.md prevents this workflow
+#       from firing on the bump commit that PSR pushes.
+#    b. PSR adds "[skip ci]" to its bump commit message as a second guard in
+#       case paths-ignore is bypassed.
 #
 # 3. TOKEN REQUIREMENTS
 #    GH_TOKEN must be a Personal Access Token (classic) or a GitHub App token
@@ -27,35 +24,48 @@ name: Semantic Release
 #    See README.md section "Release Bot Token Setup" for configuration steps.
 #
 # 4. NO-OP BEHAVIOR
-#    When there are no releasable commits (feat:/fix:/BREAKING CHANGE:) since
-#    the last tag, python-semantic-release exits with code 0 and prints
-#    "No release will be made". The workflow detects this via the output of the
-#    version step and skips downstream publish/tag steps automatically.
+#    When there are no releasable commits (feat:/fix:/perf:/BREAKING CHANGE:)
+#    since the last tag, PSR writes "released=false" to GITHUB_OUTPUT and exits
+#    0 with no file/tag/release changes. The workflow reports this cleanly.
 #
-# 5. SINGLE-RELEASE GUARANTEE
-#    This workflow only creates the version bump, CHANGELOG update, and the
-#    annotated git tag. The GitHub Release and binary attachment are handled
-#    exclusively by release.yml (which fires on v*.*.* tag push). This ensures
-#    exactly one Release per version with no duplicates.
+# 5. CONCURRENCY — cancel-in-progress: FALSE
+#    PSR's release sequence (version bump → commit → tag → GitHub Release) is
+#    NOT atomic. Cancelling a mid-flight run could leave a bumped pyproject.toml
+#    without a tag, or a tag without a GitHub Release. We use
+#    cancel-in-progress: false (default) so each run completes before the next
+#    one starts. Rapid pushes to main queue up sequentially; the second run will
+#    usually no-op (PSR computes no new version from the already-released commit).
+#
+# 6. SINGLE-RELEASE GUARANTEE
+#    PSR creates the GitHub Release object (upload_to_release = true in
+#    pyproject.toml). release.yml (triggered by the tag push) only attaches the
+#    Linux binary asset to that existing Release using append_body + asset upload.
+#    This guarantees exactly one Release per version.
+#
+# 7. PSR STEP OUTPUTS
+#    We use the official python-semantic-release/python-semantic-release GitHub
+#    Action (not the bare CLI) so that step outputs (released, version, tag) are
+#    correctly written to GITHUB_OUTPUT and are available to downstream steps.
+#    The action wraps the CLI and handles output wiring automatically.
 
 on:
   push:
     branches:
       - main
-    # Ignore paths that the release bot itself commits so we don't loop.
-    # PSR also adds "[skip ci]" to its commit message, providing a second guard.
+    # Guard against infinite loop: ignore paths that PSR's bump commit touches.
+    # PSR also adds "[skip ci]" to its commit message as a second guard.
     paths-ignore:
       - 'pyproject.toml'
       - 'CHANGELOG.md'
 
 concurrency:
-  # Only one release run at a time on main; cancel the older one if a new push
-  # arrives before the previous run completes.
   group: semantic-release-${{ github.ref }}
-  cancel-in-progress: true
+  # IMPORTANT: must be false. PSR's version+commit+tag+release sequence is not
+  # atomic — cancelling mid-run can leave the repo in an inconsistent state.
+  cancel-in-progress: false
 
 permissions:
-  contents: write  # needed to push commits + tags
+  contents: write  # needed to push commits, tags, and create GitHub Releases
 
 jobs:
   # ── Step 1: Run tests before releasing ────────────────────────────────────
@@ -65,8 +75,7 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # full history needed for semantic-release
+        # fetch-depth: 1 (default) is sufficient — the test job only runs pytest
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -88,7 +97,6 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      # Whether PSR actually made a release (true/false string)
       released: ${{ steps.semrel.outputs.released }}
       version: ${{ steps.semrel.outputs.version }}
       tag: ${{ steps.semrel.outputs.tag }}
@@ -97,7 +105,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history for version calculation
+          fetch-depth: 0  # full history required for PSR version computation
           # Use GH_TOKEN so the push to protected main is authorised.
           # The default GITHUB_TOKEN cannot push past branch protection.
           token: ${{ secrets.GH_TOKEN }}
@@ -112,45 +120,26 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install python-semantic-release
-        run: |
-          python -m pip install --upgrade pip
-          pip install "python-semantic-release>=9.0.0"
-
       - name: Run python-semantic-release
         id: semrel
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
+        # Use the official GitHub Action (not the bare CLI) so that step outputs
+        # (released, version, tag) are correctly written to GITHUB_OUTPUT.
+        # The action wraps the PSR CLI and handles output wiring automatically.
+        uses: python-semantic-release/python-semantic-release@v9
+        with:
           # PSR will:
-          #  1. Compute the next version from commits since the last tag
-          #     (feat → minor, fix → patch, breaking → major)
-          #  2. If there IS a releasable version:
-          #     a. Update project.version in pyproject.toml
-          #     b. Update CHANGELOG.md
-          #     c. Commit both files with "[skip ci]" in the message
-          #     d. Create an annotated tag v{version}
-          #     e. Push the commit + tag to main (using GH_TOKEN)
-          #     f. Create a GitHub Release (we set upload_to_release = true in
-          #        pyproject.toml; the binary asset is handled by release.yml
-          #        which fires on the tag push)
-          #  3. If there are NO releasable commits, PSR exits 0 with no changes.
-
-          semantic-release version 2>&1
-          EXIT_CODE=$?
-
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "semantic-release exited with error code $EXIT_CODE"
-            exit $EXIT_CODE
-          fi
+          #  1. Compute the next version from Conventional Commits since last tag
+          #  2. If releasable: bump pyproject.toml, update CHANGELOG.md, commit
+          #     with "[skip ci]", push annotated tag v{version} to main, create
+          #     GitHub Release with auto-generated notes from Conventional Commits
+          #  3. If not releasable: write released=false to outputs and exit 0
+          github_token: ${{ secrets.GH_TOKEN }}
+          # git_committer_name and git_committer_email are set via git config above
 
       - name: Report release outcome
         run: |
-          echo "released=${{ steps.semrel.outputs.released }}"
-          echo "version=${{ steps.semrel.outputs.version }}"
-          echo "tag=${{ steps.semrel.outputs.tag }}"
           if [ "${{ steps.semrel.outputs.released }}" = "true" ]; then
             echo "✓ Released version ${{ steps.semrel.outputs.version }} (tag ${{ steps.semrel.outputs.tag }})"
           else
-            echo "No releasable commits found — no release was made."
+            echo "No releasable commits found — no release was made (no-op)."
           fi

@@ -92,9 +92,6 @@ commit_parser = "conventional"
 # Tag format must match the existing release.yml trigger: v*.*.*
 tag_format = "v{version}"
 
-# Branch to release from
-branch = "main"
-
 # Do not build/upload to PyPI (PyPI publishing is out of scope for FR-0003)
 build_command = ""
 upload_to_pypi = false
@@ -117,6 +114,11 @@ exclude_commit_patterns = [
     "^test",
     "^refactor",
 ]
+
+[tool.semantic_release.branches.main]
+# Release from the main branch only. PSR >= 9 uses a branches table instead of
+# the deprecated top-level `branch` key.
+match = "main"
 
 [tool.semantic_release.remote]
 type = "github"

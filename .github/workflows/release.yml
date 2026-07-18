@@ -44,6 +44,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Wait for PSR to finish creating the GitHub Release before we try to
+      # upload assets to it. PSR creates the Release AFTER pushing the tag, so
+      # there is a brief window where the tag exists but the Release does not.
+      # If we attempt upload before the Release exists, softprops/action-gh-release
+      # will create a second Release — breaking the single-release guarantee.
+      # We poll the GitHub API for up to 5 minutes before proceeding.
+      - name: Wait for GitHub Release to exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          REPO="${{ github.repository }}"
+          echo "Waiting for GitHub Release for tag $TAG ..."
+          for i in $(seq 1 30); do
+            STATUS=$(gh release view "$TAG" --repo "$REPO" 2>&1 && echo "found" || echo "not_found")
+            if echo "$STATUS" | grep -q "found"; then
+              echo "✓ Release found after ${i}x10s = $((i*10))s"
+              break
+            fi
+            echo "  attempt $i/30 — release not yet available, retrying in 10s..."
+            sleep 10
+          done
+          # Final check — fail if still not found after 5 minutes
+          gh release view "$TAG" --repo "$REPO" || {
+            echo "ERROR: GitHub Release for $TAG was not found after 5 minutes."
+            echo "PSR may have encountered an error creating the Release."
+            exit 1
+          }
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -170,8 +199,8 @@ jobs:
         with:
           name: Monday CLI v${{ steps.version.outputs.version }}
           # Append install instructions to the auto-generated release notes
-          # produced by python-semantic-release. If the Release already has a
-          # body (from PSR), this prepends our install section.
+          # produced by python-semantic-release. With append_body: true,
+          # our install section is appended after the PSR-generated body.
           append_body: true
           body_path: install_notes.md
           draft: false

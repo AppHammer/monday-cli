@@ -725,6 +725,7 @@ monday-cli uses **Conventional Commits** as the source of truth for all versioni
 | `perf` | patch | `perf: batch subitem lookups to reduce API calls` |
 | `feat!` or `BREAKING CHANGE:` in footer | major (`x.0.0`) | `feat!: rename --item to --item-id` |
 | `chore` / `ci` / `docs` / `build` / `style` / `test` / `refactor` | none | `chore: update dev dependencies` |
+| `revert` | none | `revert: revert feat: add --all flag` |
 
 A commit-lint check runs on every PR and **fails the PR** if any commit message (or PR title, which becomes the squash-commit subject) does not conform.
 

@@ -26,7 +26,7 @@ This is a scratch board for automated/integration tests that exercise the CLI ag
 4. Follow a strict development flow:  
   1. Every Monday task must be well-defined for the sa. The pm agent can create a FRD as needed, but all tasks need a feature ID FR-XXXX
   2. the sa agent will break down the monday task into github issues. These are always labeled with the monday feature ID.
-  3. The coder agent is the only agent allowed to write code. Use /implement-issue --label to work on issues and qa them
+  3. The coder agent is the only agent allowed to write code. Always use /implement-feature --label to work on issues, QA and then code review them.
   4. Always pull requests, no commits working on main or commits to main ever.
 5. If you encounter a bug, issue or enhancement while working on a task, create a new task in monday on the backlog for it. We don't code anything without a monday task!
 6. As you complete phases update the status of the monday task, "Working on it", "Review", "Ready to Merge", etc. Post updated as needed.

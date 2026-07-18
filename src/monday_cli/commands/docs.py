@@ -30,7 +30,7 @@ from monday_cli.constants import (
     DOC_WRITE_TIMEOUT,
 )
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
-from monday_cli.utils.output import print_json
+from monday_cli.utils.output import print_json, secho_err
 
 # Sentinel format for idempotent append dedup.
 # Stored as a normal-text paragraph (HTML comments are stripped by the Monday
@@ -52,20 +52,20 @@ def _resolve_doc_column(
     items = result.get("items", [])
 
     if not items:
-        typer.secho(f"Item {item_id} not found", fg=typer.colors.YELLOW)
+        secho_err(f"Item {item_id} not found", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
 
     item = items[0]
     board = item.get("board")
 
     if not board:
-        typer.secho("Error: Could not determine board for item", fg=typer.colors.RED)
+        secho_err("Error: Could not determine board for item", fg=typer.colors.RED)
         raise typer.Exit(1)
 
     columns_result = client.execute_query(GET_BOARD_COLUMNS, {"boardIds": [board["id"]]})
     boards = columns_result.get("boards", [])
     if not boards:
-        typer.secho("Error: Could not fetch board columns", fg=typer.colors.RED)
+        secho_err("Error: Could not fetch board columns", fg=typer.colors.RED)
         raise typer.Exit(1)
 
     columns = boards[0].get("columns", [])
@@ -75,13 +75,13 @@ def _resolve_doc_column(
 
     if not target_column:
         available = ", ".join(f"'{col['title']}'" for col in columns)
-        typer.secho(f"Error: Column '{column_name}' not found on board", fg=typer.colors.RED)
-        typer.secho(f"Available columns: {available}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: Column '{column_name}' not found on board", fg=typer.colors.RED)
+        secho_err(f"Available columns: {available}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
 
     if target_column.get("type") != "doc":
         col_type = target_column.get("type")
-        typer.secho(
+        secho_err(
             f"Error: Column '{column_name}' is not a doc column (type: {col_type})",
             fg=typer.colors.RED,
         )
@@ -144,10 +144,9 @@ def _delete_all_doc_blocks(client: MondayGraphQLClient, internal_id: str) -> int
     iterations = 0
     while True:
         if iterations >= DOC_CLEAR_MAX_ITERATIONS:
-            typer.secho(
+            secho_err(
                 f"Warning: stopped clearing after {iterations} iterations "
                 f"({deleted} blocks deleted). The document may still have remaining blocks.",
-                err=True,
                 fg=typer.colors.YELLOW,
             )
             break
@@ -399,11 +398,11 @@ def get_doc(
     """
     try:
         if item_id is None:
-            typer.secho("Error: Item ID is required. Use --item-id", fg=typer.colors.RED)
+            secho_err("Error: Item ID is required. Use --item-id", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         if column_name is None:
-            typer.secho("Error: Column name is required. Use --column-name", fg=typer.colors.RED)
+            secho_err("Error: Column name is required. Use --column-name", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         client = get_client()
@@ -412,7 +411,7 @@ def get_doc(
 
         object_id = _get_existing_doc_object_id(item, column_id)
         if not object_id:
-            typer.secho(
+            secho_err(
                 f"No document found in column '{column_name}' for item {item_id}",
                 fg=typer.colors.YELLOW,
             )
@@ -421,7 +420,7 @@ def get_doc(
         # Resolve object_id to internal doc id
         internal_id = _resolve_doc_internal_id(client, object_id)
         if not internal_id:
-            typer.secho(
+            secho_err(
                 f"Could not resolve document (object_id={object_id})",
                 fg=typer.colors.RED,
             )
@@ -438,10 +437,9 @@ def get_doc(
                 error_detail = export.get(
                     "error", "Markdown export is not supported for this document."
                 )
-                typer.secho(
+                secho_err(
                     f"Error: Markdown export unavailable — {error_detail}",
                     fg=typer.colors.RED,
-                    err=True,
                 )
                 raise typer.Exit(1)
             # Guard against success:true but markdown:null — emit empty string, not "None"
@@ -462,7 +460,7 @@ def get_doc(
                 docs = doc_result.get("docs", [])
                 if not docs:
                     if page == 1:
-                        typer.secho(
+                        secho_err(
                             f"No content found for document {internal_id}",
                             fg=typer.colors.YELLOW,
                         )
@@ -481,19 +479,19 @@ def get_doc(
     except typer.Exit:
         raise
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -534,15 +532,15 @@ def append_doc(
     """
     try:
         if item_id is None:
-            typer.secho("Error: Item ID is required. Use --item-id", fg=typer.colors.RED)
+            secho_err("Error: Item ID is required. Use --item-id", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         if column_name is None:
-            typer.secho("Error: Column name is required. Use --column-name", fg=typer.colors.RED)
+            secho_err("Error: Column name is required. Use --column-name", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         if content is None:
-            typer.secho("Error: Content is required. Use --content", fg=typer.colors.RED)
+            secho_err("Error: Content is required. Use --content", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         client = get_client()
@@ -559,14 +557,14 @@ def append_doc(
             )
             created_doc = create_result.get("create_doc")
             if not created_doc:
-                typer.secho("Error: Failed to create document", fg=typer.colors.RED)
+                secho_err("Error: Failed to create document", fg=typer.colors.RED)
                 raise typer.Exit(1)
             internal_id = created_doc["id"]
             created = True
         else:
             internal_id = _resolve_doc_internal_id(client, object_id)
             if not internal_id:
-                typer.secho(
+                secho_err(
                     f"Could not resolve document (object_id={object_id})",
                     fg=typer.colors.RED,
                 )
@@ -579,13 +577,12 @@ def append_doc(
         # ack) — skip the write to avoid duplication.
         dedup_key = _compute_dedup_key(content)
         if not created and _doc_has_dedup_key(client, internal_id, dedup_key):
-            typer.secho(
+            secho_err(
                 "Content already present (dedup key matched); skipping duplicate append.",
                 fg=typer.colors.YELLOW,
-                err=True,
             )
             action = "updated"
-            typer.secho(f"✓ Document {action} successfully!", fg=typer.colors.GREEN)
+            secho_err(f"✓ Document {action} successfully!", fg=typer.colors.GREEN)
             print_json({"doc_id": internal_id, "item_id": str(item_id), "column_id": column_id})
             return
 
@@ -596,25 +593,25 @@ def append_doc(
         _write_markdown_chunked(client, internal_id, content_with_sentinel)
 
         action = "created" if created else "updated"
-        typer.secho(f"✓ Document {action} successfully!", fg=typer.colors.GREEN)
+        secho_err(f"✓ Document {action} successfully!", fg=typer.colors.GREEN)
         print_json({"doc_id": internal_id, "item_id": str(item_id), "column_id": column_id})
 
     except typer.Exit:
         raise
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -654,15 +651,15 @@ def put_doc(
     """
     try:
         if item_id is None:
-            typer.secho("Error: Item ID is required. Use --item-id", fg=typer.colors.RED)
+            secho_err("Error: Item ID is required. Use --item-id", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         if column_name is None:
-            typer.secho("Error: Column name is required. Use --column-name", fg=typer.colors.RED)
+            secho_err("Error: Column name is required. Use --column-name", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         if content is None:
-            typer.secho("Error: Content is required. Use --content", fg=typer.colors.RED)
+            secho_err("Error: Content is required. Use --content", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         client = get_client()
@@ -673,9 +670,8 @@ def put_doc(
         # This means we know the write strategy before any destructive operation.
         chunks = _split_markdown_chunks(content)
         content_bytes = len(content.encode("utf-8"))
-        typer.secho(
+        secho_err(
             f"Writing {content_bytes:,} bytes ({len(chunks)} chunk(s)) to doc column...",
-            err=True,
             fg=typer.colors.YELLOW,
         )
 
@@ -690,7 +686,7 @@ def put_doc(
             )
             created_doc = create_result.get("create_doc")
             if not created_doc:
-                typer.secho("Error: Failed to create document", fg=typer.colors.RED)
+                secho_err("Error: Failed to create document", fg=typer.colors.RED)
                 raise typer.Exit(1)
             internal_id = created_doc["id"]
             created = True
@@ -700,31 +696,28 @@ def put_doc(
             try:
                 _write_markdown_chunked(client, internal_id, content)
             except Exception as write_err:
-                typer.secho(
+                secho_err(
                     f"Error writing content to new doc; "
                     f"cleaning up orphaned doc object: {write_err}",
                     fg=typer.colors.RED,
-                    err=True,
                 )
                 try:
                     client.execute_mutation(DELETE_DOC, {"docId": internal_id})
-                    typer.secho(
+                    secho_err(
                         "Orphaned doc object removed. The column is clean; retry your put.",
                         fg=typer.colors.YELLOW,
-                        err=True,
                     )
                 except Exception:
-                    typer.secho(
+                    secho_err(
                         "Warning: could not remove orphaned doc object. "
                         "Run `monday docs clear` to recover the column.",
                         fg=typer.colors.RED,
-                        err=True,
                     )
                 raise typer.Exit(1)
         else:
             internal_id = _resolve_doc_internal_id(client, object_id)
             if not internal_id:
-                typer.secho(
+                secho_err(
                     f"Could not resolve document (object_id={object_id})",
                     fg=typer.colors.RED,
                 )
@@ -733,9 +726,8 @@ def put_doc(
             # US-0005-02: Exhaustive clear — always fetch page=1 until empty.
             deleted_count = _delete_all_doc_blocks(client, internal_id)
             if deleted_count:
-                typer.secho(
+                secho_err(
                     f"Cleared {deleted_count} existing block(s)",
-                    err=True,
                     fg=typer.colors.YELLOW,
                 )
 
@@ -743,25 +735,25 @@ def put_doc(
             _write_markdown_chunked(client, internal_id, content)
 
         action = "created" if created else "replaced"
-        typer.secho(f"✓ Document content {action} successfully!", fg=typer.colors.GREEN)
+        secho_err(f"✓ Document content {action} successfully!", fg=typer.colors.GREEN)
         print_json({"doc_id": internal_id, "item_id": str(item_id), "column_id": column_id})
 
     except typer.Exit:
         raise
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -796,11 +788,11 @@ def clear_doc(
     """
     try:
         if item_id is None:
-            typer.secho("Error: Item ID is required. Use --item-id", fg=typer.colors.RED)
+            secho_err("Error: Item ID is required. Use --item-id", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         if column_name is None:
-            typer.secho("Error: Column name is required. Use --column-name", fg=typer.colors.RED)
+            secho_err("Error: Column name is required. Use --column-name", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         if not force:
@@ -808,7 +800,7 @@ def clear_doc(
                 f"Clear doc column '{column_name}' on item {item_id}? This cannot be undone."
             )
             if not confirm:
-                typer.secho("Aborted.", fg=typer.colors.YELLOW)
+                secho_err("Aborted.", fg=typer.colors.YELLOW)
                 raise typer.Exit(0)
 
         client = get_client()
@@ -820,7 +812,7 @@ def clear_doc(
 
         if not object_id:
             # Column is already empty — nothing to do
-            typer.secho(
+            secho_err(
                 f"Column '{column_name}' has no document; nothing to clear.",
                 fg=typer.colors.YELLOW,
             )
@@ -840,14 +832,11 @@ def clear_doc(
         if internal_id:
             # Healthy path: clear all blocks via the exhaustive delete helper
             deleted_count = _delete_all_doc_blocks(client, internal_id)
-            typer.secho(
+            secho_err(
                 f"Cleared {deleted_count} block(s) from document.",
-                err=True,
                 fg=typer.colors.YELLOW,
             )
-            typer.secho(
-                f"✓ Doc column '{column_name}' cleared successfully!", fg=typer.colors.GREEN
-            )
+            secho_err(f"✓ Doc column '{column_name}' cleared successfully!", fg=typer.colors.GREEN)
             print_json(
                 {
                     "cleared": True,
@@ -863,16 +852,15 @@ def clear_doc(
             # state). Use clear_item_column_value to detach the dangling reference so
             # the column becomes writable again.
             if not board_id:
-                typer.secho(
+                secho_err(
                     "Error: Cannot recover corrupted cell — board ID unavailable.",
                     fg=typer.colors.RED,
                 )
                 raise typer.Exit(1)
 
-            typer.secho(
+            secho_err(
                 f"Document (object_id={object_id}) is unresolvable (orphaned). "
                 "Clearing the column reference to recover...",
-                err=True,
                 fg=typer.colors.YELLOW,
             )
             client.execute_mutation(
@@ -883,7 +871,7 @@ def clear_doc(
                     "columnId": column_id,
                 },
             )
-            typer.secho(
+            secho_err(
                 f"✓ Corrupted doc column '{column_name}' cleared successfully! "
                 "The column is now writable.",
                 fg=typer.colors.GREEN,
@@ -902,17 +890,17 @@ def clear_doc(
     except typer.Exit:
         raise
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)

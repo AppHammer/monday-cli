@@ -8,7 +8,7 @@ from monday_cli.cli import get_client, groups_app
 from monday_cli.client.mutations import CREATE_GROUP, DELETE_GROUP
 from monday_cli.client.queries import GET_BOARD_GROUPS
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
-from monday_cli.utils.output import print_json
+from monday_cli.utils.output import print_json, secho_err
 
 
 @groups_app.command("list")
@@ -28,11 +28,11 @@ def list_groups(
     """
     try:
         if board_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Board ID is required. Use --board-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday groups list --board-id 1234567890", fg=typer.colors.BLUE)
+            secho_err("Example: monday groups list --board-id 1234567890", fg=typer.colors.BLUE)
             raise typer.Exit(1)
 
         client = get_client()
@@ -47,11 +47,11 @@ def list_groups(
 
         # Check if board exists
         if not boards:
-            typer.secho(
+            secho_err(
                 f"Board {board_id} not found or you don't have access to it.",
                 fg=typer.colors.YELLOW,
             )
-            typer.secho(
+            secho_err(
                 "Tip: Use 'monday boards list' to see available boards",
                 fg=typer.colors.BLUE,
             )
@@ -63,7 +63,7 @@ def list_groups(
 
         # Check if board has any groups
         if not groups:
-            typer.secho(
+            secho_err(
                 f"No groups found on board '{board_name}' (ID: {board_id})",
                 fg=typer.colors.YELLOW,
             )
@@ -101,19 +101,19 @@ def list_groups(
             print_json(output)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -146,7 +146,7 @@ def create_group(
         if color:
             # Validate hex color format
             if not color.startswith("#") or len(color) not in [4, 7]:
-                typer.secho(
+                secho_err(
                     "Error: Color must be a hex color code (e.g., #f09999 or #f09)",
                     fg=typer.colors.RED,
                 )
@@ -159,14 +159,14 @@ def create_group(
         group = result.get("create_group")
 
         if not group:
-            typer.secho(
+            secho_err(
                 "Error: Failed to create group. No data returned from API.",
                 fg=typer.colors.RED,
             )
             raise typer.Exit(1)
 
         # Success message
-        typer.secho(
+        secho_err(
             f"✓ Group '{group.get('title')}' created successfully!",
             fg=typer.colors.GREEN,
         )
@@ -182,19 +182,19 @@ def create_group(
         print_json(output)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -226,7 +226,7 @@ def delete_group(
         boards = result.get("boards", [])
 
         if not boards:
-            typer.secho(
+            secho_err(
                 f"Board {board_id} not found or you don't have access to it.",
                 fg=typer.colors.YELLOW,
             )
@@ -245,11 +245,11 @@ def delete_group(
                 break
 
         if not group_id:
-            typer.secho(
+            secho_err(
                 f"Group with title '{title}' not found on board {board_id}",
                 fg=typer.colors.YELLOW,
             )
-            typer.secho(
+            secho_err(
                 "Tip: Use 'monday groups list --board-id {board_id}' to see available groups",
                 fg=typer.colors.BLUE,
             )
@@ -257,13 +257,13 @@ def delete_group(
 
         # Confirmation prompt
         if not confirm:
-            typer.secho(
+            secho_err(
                 f"WARNING: This will delete group '{group_title}' and all its items!",
                 fg=typer.colors.YELLOW,
             )
             confirm_delete = typer.confirm("Are you sure you want to continue?")
             if not confirm_delete:
-                typer.secho("Delete cancelled.", fg=typer.colors.BLUE)
+                secho_err("Delete cancelled.", fg=typer.colors.BLUE)
                 raise typer.Exit(0)
 
         # Execute deletion
@@ -280,7 +280,7 @@ def delete_group(
 
             if deleted_group:
                 # Success message
-                typer.secho(
+                secho_err(
                     f"✓ Group '{group_title}' deleted successfully!",
                     fg=typer.colors.GREEN,
                 )
@@ -295,7 +295,7 @@ def delete_group(
 
                 print_json(output)
             else:
-                typer.secho(
+                secho_err(
                     "Error: Failed to delete group. No data returned from API.",
                     fg=typer.colors.RED,
                 )
@@ -317,7 +317,7 @@ def delete_group(
 
                     if not group_still_exists:
                         # Group was deleted despite the error
-                        typer.secho(
+                        secho_err(
                             f"✓ Group '{group_title}' deleted successfully!",
                             fg=typer.colors.GREEN,
                         )
@@ -334,17 +334,17 @@ def delete_group(
             raise
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)

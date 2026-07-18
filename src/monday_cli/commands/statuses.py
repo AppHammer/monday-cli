@@ -9,7 +9,7 @@ from rich.table import Table
 from monday_cli.cli import get_client, statuses_app
 from monday_cli.client.queries import GET_BOARD_COLUMNS
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
-from monday_cli.utils.output import print_json
+from monday_cli.utils.output import print_json, secho_err
 
 
 @statuses_app.command("list")
@@ -29,11 +29,11 @@ def list_statuses(
     """
     try:
         if board_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Board ID is required. Use --board-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday statuses list --board-id 1234567890", fg=typer.colors.BLUE)
+            secho_err("Example: monday statuses list --board-id 1234567890", fg=typer.colors.BLUE)
             raise typer.Exit(1)
 
         client = get_client()
@@ -43,7 +43,7 @@ def list_statuses(
 
         boards = columns_result.get("boards", [])
         if not boards:
-            typer.secho(
+            secho_err(
                 f"Board {board_id} not found or you don't have access",
                 fg=typer.colors.YELLOW,
             )
@@ -79,7 +79,7 @@ def list_statuses(
                     continue
 
         if not status_columns:
-            typer.secho(
+            secho_err(
                 f"No status columns found on board '{board_name}' (ID: {board_id})",
                 fg=typer.colors.YELLOW,
             )
@@ -127,17 +127,17 @@ def list_statuses(
             print_json(output)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)

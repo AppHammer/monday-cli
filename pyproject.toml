@@ -63,3 +63,6 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --cov=src/monday_cli --cov-report=html --cov-report=term"
+markers = [
+    "integration: live integration tests against the Monday.com API (requires MONDAY_API_TOKEN); select with -m integration",
+]

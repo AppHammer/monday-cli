@@ -26,7 +26,7 @@ name: Commit Lint
 #  the squash commit subject. This check lints the PR title so the squash commit
 #  also conforms, regardless of the individual commit messages.
 #
-# commitlint config is in commitlint.config.js at the repo root.
+# commitlint config is in commitlint.config.mjs at the repo root.
 
 on:
   pull_request:
@@ -53,7 +53,7 @@ jobs:
       - name: Lint commit messages (Conventional Commits)
         uses: wagoid/commitlint-github-action@v6
         with:
-          configFile: commitlint.config.js
+          configFile: commitlint.config.mjs
           # Lint the PR title as well (squash-merge target)
           firstParent: false
           failOnWarnings: false
@@ -66,7 +66,7 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          echo "$PR_TITLE" | npx --yes commitlint --config commitlint.config.js || {
+          echo "$PR_TITLE" | npx --yes commitlint --config commitlint.config.mjs || {
             echo ""
             echo "PR title must follow Conventional Commits format."
             echo "Examples:"

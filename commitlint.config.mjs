@@ -22,7 +22,7 @@
  *   docs: document Conventional Commits process in README
  */
 
-module.exports = {
+export default {
   extends: ['@commitlint/config-conventional'],
   rules: {
     // Allow longer subject lines (Monday CLI commit subjects can be verbose)

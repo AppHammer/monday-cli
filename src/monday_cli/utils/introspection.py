@@ -143,13 +143,27 @@ def _command_help(command: Any) -> str | None:
     return _clean_help(getattr(command, "help", None) or getattr(command, "short_help", None))
 
 
+_JSON_PRIMITIVE_TYPES = (str, int, float, bool)
+
+
+def _json_safe_default(value: Any) -> Any:
+    """Coerce a Click parameter default to a JSON-serializable representation.
+
+    Callables (e.g. Click's lazily-evaluated defaults) become ``None``. Values
+    that are already JSON primitives (``str``/``int``/``float``/``bool``/``None``)
+    pass through unchanged. Anything else non-JSON-serializable (``Enum``,
+    ``Path``, ``datetime``, ``set``, ``Ellipsis``, ...) is stringified so
+    ``guide --json`` can never raise ``TypeError`` from ``json.dumps``.
+    """
+    if callable(value):
+        return None
+    if value is None or isinstance(value, _JSON_PRIMITIVE_TYPES):
+        return value
+    return str(value)
+
+
 def _build_param(param: Any) -> ParamModel:
     """Convert a Click parameter into a ParamModel."""
-    default = param.default
-    # Normalize non-JSON-safe defaults (e.g. callables) to None.
-    if callable(default):
-        default = None
-
     param_type = getattr(param, "type", None)
     type_name = getattr(param_type, "name", "text") if param_type is not None else "text"
 
@@ -158,7 +172,7 @@ def _build_param(param: Any) -> ParamModel:
         kind=getattr(param, "param_type_name", "option"),  # "option" | "argument"
         type=type_name,
         required=bool(getattr(param, "required", False)),
-        default=default,
+        default=_json_safe_default(param.default),
         help=_clean_help(getattr(param, "help", None)),
         opts=list(getattr(param, "opts", []) or []),
     )

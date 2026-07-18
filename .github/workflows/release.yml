@@ -170,12 +170,23 @@ jobs:
           # Create a throwaway item whose name contains non-ASCII chars.
           # This deterministically triggers rich._unicode_data.load() when Rich
           # lays out the table, which is the exact call that crashed pre-fix binaries.
-          ITEM_JSON=$(dist/monday items create \
+          # items create always emits a success line before the JSON blob, so we
+          # extract the JSON by locating the first '{' in the mixed output.
+          ITEM_OUTPUT=$(dist/monday items create \
             --board-id "$MONDAY_TEST_BOARD_ID" \
-            --name "pyinstaller-table-guard ✓ café" \
-            --json 2>&1)
-          echo "create output: $ITEM_JSON"
-          ITEM_ID=$(echo "$ITEM_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || true)
+            --name "pyinstaller-table-guard ✓ café" 2>&1)
+          echo "create output: $ITEM_OUTPUT"
+          ITEM_ID=$(echo "$ITEM_OUTPUT" | python3 -c "
+import sys, json
+text = sys.stdin.read()
+start = text.find('{')
+if start >= 0:
+    try:
+        data = json.loads(text[start:])
+        print(data.get('id', ''))
+    except Exception:
+        pass
+" 2>/dev/null || true)
           if [ -z "$ITEM_ID" ]; then
             echo "ERROR: Failed to create test item — cannot run table guard."
             echo "Raw output: $ITEM_JSON"
@@ -215,7 +226,7 @@ jobs:
           echo "Table guard PASSED: exit 0, no traceback, no ModuleNotFoundError."
 
       - name: Table guard — cleanup (always runs)
-        if: steps.table-gate.outputs.run == 'true' && always()
+        if: always() && steps.table-gate.outputs.run == 'true'
         env:
           MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
         run: |

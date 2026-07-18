@@ -62,6 +62,13 @@ ruff check src tests
 black src tests
 mypy src            # strict mode is enabled
 
+# NOTE: these three checks are enforced on every PR by the Quality CI workflow
+# (.github/workflows/quality.yml). PRs must be green before merging.
+# Run them locally before opening a PR:
+#   ruff check src tests
+#   black --check src tests
+#   mypy src
+
 # Build the standalone Linux binary -> dist/monday
 python build/build_binary.py
 ```
@@ -166,6 +173,7 @@ merge to main → tests.yml (gate) → semantic-release.yml:
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `tests.yml` | push/PR | Unit tests (gate for release) |
+| `quality.yml` | push/PR | Lint & type-check gate (ruff + black --check + mypy) |
 | `commit-lint.yml` | PR | Enforces Conventional Commits |
 | `semantic-release.yml` | push to main | Version bump + tag + changelog |
 | `release.yml` | tag `v*.*.*` | Build + attach Linux binary |

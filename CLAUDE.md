@@ -57,17 +57,10 @@ pytest -m integration                    # only integration tests
 pytest tests/integration -m integration  # same, scoped to the folder
 MONDAY_TEST_BOARD_ID=<id> pytest -m integration  # override the test board (never the PM board)
 
-# Lint / format / type-check
+# Lint / format / type-check (enforced on every PR by .github/workflows/quality.yml)
 ruff check src tests
-black src tests
+black --check src tests
 mypy src            # strict mode is enabled
-
-# NOTE: these three checks are enforced on every PR by the Quality CI workflow
-# (.github/workflows/quality.yml). PRs must be green before merging.
-# Run them locally before opening a PR:
-#   ruff check src tests
-#   black --check src tests
-#   mypy src
 
 # Build the standalone Linux binary -> dist/monday
 python build/build_binary.py

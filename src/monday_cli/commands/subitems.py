@@ -29,10 +29,8 @@ def get_subitem(
         monday subitems get --subitem-id 1234567890
     """
     if subitem_id is None:
-        typer.secho(
-            "Error: --subitem-id is required\n" "Usage: monday subitems get --subitem-id <id>",
-            fg=typer.colors.RED,
-        )
+        typer.secho("Error: --subitem-id is required", fg=typer.colors.RED)
+        typer.secho("Usage: monday subitems get --subitem-id <id>", fg=typer.colors.BLUE)
         raise typer.Exit(1)
 
     try:

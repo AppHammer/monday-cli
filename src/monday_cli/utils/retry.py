@@ -39,7 +39,7 @@ def create_retry_decorator(
     Returns:
         Retry decorator
     """
-    return retry(  # type: ignore[return-value]
+    return retry(
         stop=stop_after_attempt(max_attempts),
         wait=wait_exponential(
             multiplier=backoff_factor,

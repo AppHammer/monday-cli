@@ -658,7 +658,9 @@ def list_items(
                 ]
             else:  # group filter (title)
                 # Case-insensitive match on group title
-                group_lower = group.lower()
+                # group is guaranteed non-None here: we're in `if group or group_id`
+                # and group_id is falsy, so group must be truthy.
+                group_lower = (group or "").lower()
                 all_items = [
                     item
                     for item in all_items

@@ -1,10 +1,12 @@
 """Commands for managing Monday.com documents."""
 
 import json
+from typing import Any
 
 import typer
 
 from monday_cli.cli import docs_app, get_client
+from monday_cli.client.graphql_client import MondayGraphQLClient
 from monday_cli.client.mutations import ADD_CONTENT_FROM_MARKDOWN, CREATE_DOC, DELETE_DOC_BLOCK
 from monday_cli.client.queries import (
     EXPORT_MARKDOWN_FROM_DOC,
@@ -17,7 +19,9 @@ from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, 
 from monday_cli.utils.output import print_json
 
 
-def _resolve_doc_column(client, item_id: int, column_name: str):
+def _resolve_doc_column(
+    client: MondayGraphQLClient, item_id: int, column_name: str
+) -> tuple[dict[str, Any], str]:
     """Resolve item and doc column. Returns (item, column_id) or raises typer.Exit."""
     result = client.execute_query(GET_ITEM_BY_ID, {"itemIds": [str(item_id)]})
     items = result.get("items", [])
@@ -61,7 +65,7 @@ def _resolve_doc_column(client, item_id: int, column_name: str):
     return item, target_column["id"]
 
 
-def _get_existing_doc_object_id(item, column_id: str) -> str | None:
+def _get_existing_doc_object_id(item: dict[str, Any], column_id: str) -> str | None:
     """Extract the doc object_id from an item's column values, or None.
 
     The objectId stored in the column value is the object_id in the docs API,
@@ -87,7 +91,7 @@ def _get_existing_doc_object_id(item, column_id: str) -> str | None:
     return None
 
 
-def _resolve_doc_internal_id(client, object_id: str) -> str | None:
+def _resolve_doc_internal_id(client: MondayGraphQLClient, object_id: str) -> str | None:
     """Resolve a doc object_id to its internal doc id via the docs API."""
     result = client.execute_query(GET_DOC_BY_OBJECT_ID, {"objectIds": [str(object_id)]})
     docs = result.get("docs", [])
@@ -304,7 +308,7 @@ def append_doc(
         raise typer.Exit(1)
 
 
-def _delete_all_doc_blocks(client, internal_id: str) -> int:
+def _delete_all_doc_blocks(client: MondayGraphQLClient, internal_id: str) -> int:
     """Delete all blocks from a document. Returns the number of blocks deleted."""
     deleted = 0
     page = 1

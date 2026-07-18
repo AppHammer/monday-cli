@@ -1,5 +1,7 @@
 """Commands for managing Monday.com workspaces."""
 
+from typing import Any
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -58,7 +60,7 @@ def list_workspaces(
         # Build variables
         # Note: Monday.com API doesn't have cursor-based pagination for workspaces
         # We'll use a large limit to fetch all at once
-        variables = {
+        variables: dict[str, Any] = {
             "limit": 1000,  # Large enough to get all workspaces
         }
 

@@ -1,5 +1,7 @@
 """Commands for managing Monday.com boards."""
 
+from typing import Any
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -62,7 +64,7 @@ def list_boards(
 
         while True:
             # Build variables
-            variables = {
+            variables: dict[str, Any] = {
                 "limit": limit,
                 "page": page,
             }

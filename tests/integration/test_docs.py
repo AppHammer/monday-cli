@@ -37,7 +37,7 @@ def _discover_doc_column(item_id: str) -> str | None:
     columns = result.get("columns", [])
     for column in columns:
         if column.get("type") == "doc":
-            return column["title"]
+            return str(column["title"])
     return None
 
 

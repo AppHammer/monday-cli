@@ -1,0 +1,46 @@
+name: Actionlint
+
+# Lints the GitHub Actions workflow files themselves (YAML/syntax, run: shell via
+# shellcheck, uses: refs, and ${{ }} expressions) so workflow defects are caught in
+# a PR instead of failing at runtime on main. Needs no repository secrets, so it runs
+# on forked-PR contributions too. See README "Continuous Integration" for details.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Pin actionlint deterministically so a new upstream release cannot turn a green PR
+# red without an explicit bump here. Matches the version FR-0010 validated against.
+# ACTIONLINT_SHA256 is the published checksum for actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz,
+# verified before extraction below so a compromised or corrupted download fails closed.
+env:
+  ACTIONLINT_VERSION: "1.7.7"
+  ACTIONLINT_SHA256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
+
+jobs:
+  actionlint:
+    name: Lint workflow files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download pinned actionlint binary
+        run: |
+          curl -sSfL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xz actionlint -f actionlint.tar.gz
+          ./actionlint --version
+
+      - name: Run actionlint
+        # ubuntu-latest ships shellcheck, which actionlint auto-detects to lint the
+        # shell in every run: block. Errors fail the build; warnings stay non-fatal.
+        run: ./actionlint -color

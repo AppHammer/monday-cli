@@ -55,10 +55,12 @@ def test_create_unknown_group_is_teaching_error(runner, use_client) -> None:
         app, ["items", "create", "--board-id", "1", "--name", "T", "-g", "bogus"]
     )
     assert result.exit_code == 1
-    assert "Available groups" in result.stdout
-    assert "group_abc" in result.stdout
+    # FR-0008: errors go to stderr, stdout stays clean JSON-only.
+    assert "Available groups" in result.stderr
+    assert "group_abc" in result.stderr
     # Clean teaching error — no spurious "Unexpected error" line.
-    assert "Unexpected error" not in result.stdout
+    assert "Unexpected error" not in result.stderr
+    assert result.stdout.strip() == ""
 
 
 def test_create_group_and_group_id_mutually_exclusive(runner, use_client) -> None:
@@ -68,4 +70,4 @@ def test_create_group_and_group_id_mutually_exclusive(runner, use_client) -> Non
         ["items", "create", "--board-id", "1", "--name", "T", "-g", "topics", "--group-id", "x"],
     )
     assert result.exit_code == 1
-    assert "Cannot use both" in result.stdout
+    assert "Cannot use both" in result.stderr

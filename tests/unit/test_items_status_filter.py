@@ -77,8 +77,9 @@ def test_multiple_status_columns_requires_status_column(runner, use_client) -> N
     use_client(_two_status_client())
     result = runner.invoke(app, ["items", "list", "--board-id", "1", "--status", "Done"])
     assert result.exit_code == 1
-    assert "Status" in result.stdout and "Priority" in result.stdout
-    assert "--status-column" in result.stdout
+    # FR-0008: errors go to stderr, stdout stays clean JSON-only.
+    assert "Status" in result.stderr and "Priority" in result.stderr
+    assert "--status-column" in result.stderr
 
 
 def test_status_column_selects_priority(runner, use_client) -> None:
@@ -100,15 +101,15 @@ def test_non_status_column_is_teaching_error(runner, use_client) -> None:
         ["items", "list", "--board-id", "1", "--status", "High", "--status-column", "Nonexistent"],
     )
     assert result.exit_code == 1
-    assert "Available status columns" in result.stdout
+    assert "Available status columns" in result.stderr
 
 
 def test_bad_label_lists_chosen_column_labels(runner, use_client) -> None:
     use_client(_single_status_client())
     result = runner.invoke(app, ["items", "list", "--board-id", "1", "--status", "Nope"])
     assert result.exit_code == 1
-    assert "Available statuses" in result.stdout
-    assert "Done" in result.stdout and "Stuck" in result.stdout
+    assert "Available statuses" in result.stderr
+    assert "Done" in result.stderr and "Stuck" in result.stderr
 
 
 def test_valid_label_zero_matches_returns_empty_exit_0(runner, use_client) -> None:

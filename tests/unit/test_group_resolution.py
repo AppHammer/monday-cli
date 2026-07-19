@@ -104,9 +104,10 @@ def test_unknown_group_is_teaching_error_exit_1(runner, use_client) -> None:
     use_client(_client())
     result = runner.invoke(app, ["items", "list", "--board-id", "1", "-g", "bogus"])
     assert result.exit_code == 1
-    # Teaching error lists available groups as id + title.
-    assert "Topics" in result.stdout and "topics" in result.stdout
-    assert "In Progress" in result.stdout and "group_abc" in result.stdout
+    # Teaching error lists available groups as id + title (FR-0008: errors go
+    # to stderr, stdout stays clean JSON-only).
+    assert "Topics" in result.stderr and "topics" in result.stderr
+    assert "In Progress" in result.stderr and "group_abc" in result.stderr
 
 
 def test_valid_but_empty_group_returns_empty_list_exit_0(runner, use_client) -> None:
@@ -137,4 +138,4 @@ def test_group_and_group_id_mutually_exclusive(runner, use_client) -> None:
         app, ["items", "list", "--board-id", "1", "-g", "topics", "--group-id", "topics"]
     )
     assert result.exit_code == 1
-    assert "Cannot use both" in result.stdout
+    assert "Cannot use both" in result.stderr

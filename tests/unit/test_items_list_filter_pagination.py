@@ -138,7 +138,8 @@ def test_unknown_group_id_is_teaching_error_exit_1(runner, use_client) -> None:
         app, ["items", "list", "--board-id", "1", "--group-id", "definitely-not-a-group"]
     )
     assert result.exit_code == 1
-    assert "Available groups" in result.stdout
+    # FR-0008: errors go to stderr, stdout stays clean JSON-only.
+    assert "Available groups" in result.stderr
 
 
 def test_valid_but_empty_group_id_is_exit_0_empty_items(runner, use_client) -> None:
@@ -217,7 +218,7 @@ def test_invalid_group_id_fails_fast_without_full_scan(runner, use_client) -> No
         app, ["items", "list", "--board-id", "1", "--group-id", "not-a-real-group"]
     )
     assert result.exit_code == 1
-    assert "Available groups" in result.stdout
+    assert "Available groups" in result.stderr
     assert not any("next_items_page" in q for q, _ in client.queries)
 
 
@@ -239,5 +240,5 @@ def test_invalid_status_fails_fast_without_full_scan(runner, use_client) -> None
     use_client(client)
     result = runner.invoke(app, ["items", "list", "--board-id", "1", "--status", "Nope"])
     assert result.exit_code == 1
-    assert "Available statuses" in result.stdout
+    assert "Available statuses" in result.stderr
     assert not any("next_items_page" in q for q, _ in client.queries)

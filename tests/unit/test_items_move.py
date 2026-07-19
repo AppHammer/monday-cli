@@ -76,16 +76,17 @@ def test_move_unknown_item_exit_1(runner, use_client) -> None:
     use_client(FakeClient(item_by_id=None, groups=GROUPS))
     result = runner.invoke(app, ["items", "move", "-i", "999", "--group-id", "group_b"])
     assert result.exit_code == 1
-    assert "not found" in result.stdout
-    assert "Unexpected error" not in result.stdout
+    # FR-0008: errors go to stderr, stdout stays clean JSON-only.
+    assert "not found" in result.stderr
+    assert "Unexpected error" not in result.stderr
 
 
 def test_move_unresolvable_group_exit_1_lists_groups(runner, use_client) -> None:
     use_client(FakeClient(item_by_id=_item(), groups=GROUPS))
     result = runner.invoke(app, ["items", "move", "-i", "100", "-g", "bogus"])
     assert result.exit_code == 1
-    assert "Available groups" in result.stdout
-    assert "group_a" in result.stdout and "group_b" in result.stdout
+    assert "Available groups" in result.stderr
+    assert "group_a" in result.stderr and "group_b" in result.stderr
 
 
 def test_move_api_rejection_is_taught(runner, use_client) -> None:
@@ -98,7 +99,7 @@ def test_move_api_rejection_is_taught(runner, use_client) -> None:
     )
     result = runner.invoke(app, ["items", "move", "-i", "100", "--group-id", "group_b"])
     assert result.exit_code == 1
-    assert "Available groups" in result.stdout
+    assert "Available groups" in result.stderr
 
 
 def test_move_noop_when_already_in_target(runner, use_client) -> None:
@@ -118,18 +119,18 @@ def test_move_both_group_flags_rejected(runner, use_client) -> None:
         app, ["items", "move", "-i", "100", "-g", "Group B", "--group-id", "group_b"]
     )
     assert result.exit_code == 1
-    assert "Cannot use both" in result.stdout
+    assert "Cannot use both" in result.stderr
 
 
 def test_move_subitem_rejected(runner, use_client) -> None:
     use_client(FakeClient(item_by_id=_item(board_name="Subitems of Test Board"), groups=GROUPS))
     result = runner.invoke(app, ["items", "move", "-i", "100", "--group-id", "group_b"])
     assert result.exit_code == 1
-    assert "subitem" in result.stdout.lower()
+    assert "subitem" in result.stderr.lower()
 
 
 def test_move_requires_a_group_flag(runner, use_client) -> None:
     use_client(FakeClient(item_by_id=_item(), groups=GROUPS))
     result = runner.invoke(app, ["items", "move", "-i", "100"])
     assert result.exit_code == 1
-    assert "destination group is required" in result.stdout.lower()
+    assert "destination group is required" in result.stderr.lower()

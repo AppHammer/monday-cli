@@ -309,10 +309,13 @@ def test_delete_removes_item_and_list_confirms_removal(
 
     # With the group now empty, `items list --group-id` exits 0 and returns a
     # JSON payload with an empty `items` list (a valid-but-empty group is
-    # distinguishable from an unknown group after FR-0009 Epic B).
+    # distinguishable from an unknown group after FR-0009 Epic B). This is a
+    # clean, silent empty result -- no human-readable "not found" message is
+    # printed for a valid-but-empty group (only an unknown one is an error).
     list_data = run_cli("items", "list", "--board-id", test_board_id, "--group-id", group_id)
     assert isinstance(list_data, dict)
-    assert list_data["items"] == []
+    assert list_data.get("items") == []
+    assert list_data.get("items_count") == 0
     assert list_data.get("group_id_filter") == group_id
 
     # Idempotent re-delete must not raise -- confirms teardown safety.

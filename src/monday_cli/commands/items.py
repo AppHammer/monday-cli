@@ -574,10 +574,20 @@ def list_items(
     Returns items with pagination support. By default, returns the first 100 items.
     Use --cursor to get the next page, or --all to fetch all items automatically.
 
+    A group and/or status filter (-g/--group, --group-id, --status) ALWAYS scans
+    the entire board internally first, even without --all, so a non-empty
+    group/status match can never be missed just because it lives on page 2+ (a
+    filtered query implies a full scan). When a filter forces this internal full
+    scan, the JSON `cursor` is null and `has_more` is false (pagination is
+    exhausted); without any filter, normal single-page pagination is unchanged.
+
     Filter by group using -g/--group (accepts a group TITLE or id, auto-detected)
     or --group-id (id-only, exact match). Passing a group id to -g returns exactly
-    what --group-id with the same id returns. An unknown group is a teaching error
-    (exit 1); a valid-but-empty group returns items: [] (exit 0).
+    what --group-id with the same id returns. An unknown group -- via EITHER flag
+    -- is a teaching error (exit 1) listing the board's available groups; a
+    valid-but-empty group returns items: [] (exit 0). The resolved group id is
+    always echoed under the stable `group_id_filter` JSON key, regardless of
+    which flag matched it (`group_filter` is also kept, raw, for -g).
 
     Filter by status with --status "<label>" (case-insensitive). If the board has
     more than one status column you must name it with --status-column "<title>"
@@ -644,6 +654,12 @@ def list_items(
             )
             raise typer.Exit(1)
 
+        # A group and/or status filter forces an internal full-board scan
+        # below: filtering only the fetched page would let a non-empty
+        # group/status whose matches live beyond page 1 come back as
+        # items: [] -- indistinguishable from a genuinely empty group.
+        filter_active = bool(group or group_id or status)
+
         client = get_client()
 
         # Fetch first page
@@ -689,20 +705,27 @@ def list_items(
         all_items = items_page.get("items", [])
         next_cursor = items_page.get("cursor")
 
-        # If --all flag is set, fetch all pages
+        # Fetch every remaining page when the caller asked for --all OR when a
+        # group/status filter is active (a filtered query implies a full
+        # scan -- see `filter_active` above). Progress messages are only
+        # printed for an explicit --all; a scan forced internally by a filter
+        # must stay invisible so stdout remains clean, parseable JSON.
         pages_fetched = 1
-        if all_pages and next_cursor:
-            typer.secho(
-                f"Fetching page {pages_fetched}... ({len(all_items)} items)",
-                fg=typer.colors.BLUE,
-            )
+        scan_all = all_pages or filter_active
+        if scan_all and next_cursor:
+            if all_pages:
+                typer.secho(
+                    f"Fetching page {pages_fetched}... ({len(all_items)} items)",
+                    fg=typer.colors.BLUE,
+                )
 
             while next_cursor:
                 pages_fetched += 1
-                typer.secho(
-                    f"Fetching page {pages_fetched}...",
-                    fg=typer.colors.BLUE,
-                )
+                if all_pages:
+                    typer.secho(
+                        f"Fetching page {pages_fetched}...",
+                        fg=typer.colors.BLUE,
+                    )
 
                 result = client.execute_query(
                     GET_NEXT_ITEMS_PAGE,
@@ -714,30 +737,56 @@ def list_items(
                 all_items.extend(page_items)
                 next_cursor = next_page.get("cursor")
 
-                typer.secho(
-                    f"  Total items so far: {len(all_items)}",
-                    fg=typer.colors.BLUE,
-                )
+                if all_pages:
+                    typer.secho(
+                        f"  Total items so far: {len(all_items)}",
+                        fg=typer.colors.BLUE,
+                    )
 
                 # Safety check to prevent infinite loops
                 if pages_fetched > 1000:
-                    typer.secho(
-                        "Warning: Reached maximum page limit (1000). Stopping pagination.",
-                        fg=typer.colors.YELLOW,
-                    )
+                    if all_pages:
+                        typer.secho(
+                            "Warning: Reached maximum page limit (1000). Stopping pagination.",
+                            fg=typer.colors.YELLOW,
+                        )
                     break
 
-        # Apply group filtering if specified (client-side, after pagination).
-        #   --group-id : id-only, exact match, no resolution.
+        # Apply group filtering if specified (client-side, over the fully
+        # scanned item set fetched above when a filter is active).
+        #   --group-id : id-only, exact match, validated against the board's
+        #     real groups so an unknown id teaches instead of silently
+        #     returning items: [].
         #   -g/--group : title OR id, resolved via the shared resolver so that
         #     `-g <id>` filters on the SAME group.id path as `--group-id <id>`.
-        # Empty vs unknown are distinguishable: an unknown -g value is a teaching
-        # error (exit 1); a valid-but-empty group falls through to items: [] (exit 0).
+        # Empty vs unknown are distinguishable: an unknown group value (either
+        # flag) is a teaching error (exit 1); a valid-but-empty group falls
+        # through to items: [] (exit 0).
+        resolved_group_id: str | None = None
         if group_id:
+            groups = fetch_board_groups(client, str(final_board_id))
+            group_ids = {g.get("id") for g in groups}
+            if group_id not in group_ids:
+                typer.secho(
+                    f"Error: No group matching '{group_id}' on board {final_board_id}",
+                    fg=typer.colors.RED,
+                )
+                typer.secho(
+                    f"Available groups: {format_groups_for_error(groups)}",
+                    fg=typer.colors.YELLOW,
+                )
+                example_id = groups[0]["id"] if groups else "group_abc123"
+                typer.secho(
+                    f"Example: monday items list --board-id {final_board_id} "
+                    f'--group-id "{example_id}"',
+                    fg=typer.colors.BLUE,
+                )
+                raise typer.Exit(1)
+            resolved_group_id = group_id
             all_items = [
                 item
                 for item in all_items
-                if item.get("group") and item["group"].get("id") == group_id
+                if item.get("group") and item["group"].get("id") == resolved_group_id
             ]
         elif group:
             resolved_group, groups = resolve_group_ref(client, str(final_board_id), group)
@@ -920,11 +969,16 @@ def list_items(
                     "items_count": len(all_items),
                 }
 
-            # Add filter metadata if used (reflects ALL active filters).
+            # Add filter metadata if used (reflects ALL active filters). The
+            # RESOLVED group id is always surfaced under the single stable
+            # `group_id_filter` key regardless of which flag matched it, so an
+            # agent can rely on one key; the raw `group_filter` (-g input) is
+            # preserved unchanged for backward compatibility -- nothing is
+            # renamed or removed, only added.
             if group:
                 output["group_filter"] = group
-            if group_id:
-                output["group_id_filter"] = group_id
+            if resolved_group_id:
+                output["group_id_filter"] = resolved_group_id
             if status:
                 output["status_filter"] = status
                 output["status_column"] = resolved_status_column_title

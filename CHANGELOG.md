@@ -46,6 +46,27 @@ composes with pagination.
   (exit 1); a valid-but-empty group returns JSON `items: []` with filter
   metadata (exit 0). The old ambiguous "No items found" / exit 0 for the
   valid-but-empty case is gone. (Epic B, Closes #57)
+- **A group/status filter on `items list` now always scans the whole board.**
+  Previously a filter only applied to the already-fetched page unless `--all`
+  was also passed, so a genuinely non-empty group/status whose matches lived
+  beyond page 1 could come back as `items: []` (exit 0) — indistinguishable
+  from an actually-empty one. Any active `-g`/`--group`, `--group-id`, or
+  `--status` filter now implies a full internal scan regardless of `--all`;
+  when that scan is forced, `cursor` is `null` and `has_more` is `false`
+  (coherent, not a misleading mid-stream cursor) rather than the pre-filter
+  page's cursor.
+- **`--group-id` now validates against the board's real groups.** An unknown
+  `--group-id` used to silently return `items: []` (exit 0); it is now a
+  teaching error listing available groups (exit 1), symmetric with the
+  existing `-g`/`--group` behavior. A valid-but-empty group id is unaffected
+  (`items: []`, exit 0).
+- **`items list` JSON always echoes the resolved group id under one stable
+  key.** `group_id_filter` is now populated with the *resolved* group id for
+  every active group filter, regardless of whether `-g`/`--group` or
+  `--group-id` was used (previously only `--group-id` populated it, and `-g`
+  only echoed the raw, unresolved input under `group_filter`). Both keys are
+  preserved — nothing is renamed or removed, only added — so existing
+  consumers of either key keep working.
 
 
 ## Unreleased — FR-0006 quality baseline (no version bump: chore/ci only)

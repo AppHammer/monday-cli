@@ -72,6 +72,44 @@ def test_list_json_null_group_is_safe(runner, use_client) -> None:
     assert data["items"][0]["group"] is None
 
 
+def test_get_json_preserves_group_id_and_title(runner, use_client) -> None:
+    """Command-level counterpart to `test_list_json_preserves_group_id_and_title`."""
+    use_client(
+        FakeClient(
+            item_by_id={
+                "id": "1",
+                "name": "A",
+                "state": "active",
+                "group": {"id": "group_abc", "title": "In Progress"},
+                "board": {"id": "1", "name": "Test Board"},
+            }
+        )
+    )
+    result = runner.invoke(app, ["items", "get", "--item-id", "1"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["group"] == {"id": "group_abc", "title": "In Progress"}
+
+
+def test_get_json_null_group_is_safe(runner, use_client) -> None:
+    """Command-level counterpart to `test_list_json_null_group_is_safe`."""
+    use_client(
+        FakeClient(
+            item_by_id={
+                "id": "2",
+                "name": "NoGroup",
+                "state": "active",
+                "group": None,
+                "board": {"id": "1", "name": "Test Board"},
+            }
+        )
+    )
+    result = runner.invoke(app, ["items", "get", "--item-id", "2"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["group"] is None
+
+
 def test_table_renders_group_id_and_placeholder(runner, use_client) -> None:
     use_client(
         FakeClient(

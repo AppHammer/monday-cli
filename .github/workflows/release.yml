@@ -176,17 +176,7 @@ jobs:
             --board-id "$MONDAY_TEST_BOARD_ID" \
             --name "pyinstaller-table-guard ✓ café" 2>&1)
           echo "create output: $ITEM_OUTPUT"
-          ITEM_ID=$(echo "$ITEM_OUTPUT" | python3 -c "
-import sys, json
-text = sys.stdin.read()
-start = text.find('{')
-if start >= 0:
-    try:
-        data = json.loads(text[start:])
-        print(data.get('id', ''))
-    except Exception:
-        pass
-" 2>/dev/null || true)
+          ITEM_ID=$(echo "$ITEM_OUTPUT" | python3 -c "import sys,json,re; t=sys.stdin.read(); m=re.search(r'\{.*\}', t, re.S); print((json.loads(m.group(0)).get('id','')) if m else '')" 2>/dev/null || true)
           if [ -z "$ITEM_ID" ]; then
             echo "ERROR: Failed to create test item — cannot run table guard."
             echo "Raw output: $ITEM_JSON"

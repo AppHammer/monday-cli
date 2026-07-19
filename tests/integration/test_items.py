@@ -153,20 +153,19 @@ def test_update_status_round_trips_via_get(created_item: Callable[..., str]) -> 
         matches = [cv for cv in d.get("column_values", []) if cv.get("id") == column_id]
         return len(matches) == 1 and matches[0].get("text") == label
 
+    # Budget: 20 × 5s = 100s. ``items get`` by ID is strongly consistent, but
+    # under full-suite rate-limit pressure (60+ API calls in 7 minutes) the
+    # 429 → exit-1 path can repeat for up to 60s before Monday's window resets.
+    # We must outlast a full 60-second rate-limit window plus a few retries.
     fetched = poll_until(
         _has_label,
         ("items", "get", "--item-id", item_id),
-        attempts=12,
-        delay=2.0,
-        # No expect_error=True: items get by ID is strongly consistent; a genuine
-        # "Item not found" should fail fast (raises AssertionError via run_cli),
-        # not burn 12 retries returning a raw string.  Rate-limit exits (429 →
-        # exit 1) are also AssertionError and are retried by poll_until's
-        # except AssertionError handler — expect_error=True is not needed.
+        attempts=20,
+        delay=5.0,
     )
     assert isinstance(fetched, dict), (
         f"items get never returned a parseable JSON dict for item {item_id} "
-        f"after 12 attempts (24s) -- possible rate-limit or API issue"
+        f"after 20 attempts (100s) -- rate-limit or API issue during full-suite run"
     )
     matches = [cv for cv in fetched["column_values"] if cv.get("id") == column_id]
     assert len(matches) == 1

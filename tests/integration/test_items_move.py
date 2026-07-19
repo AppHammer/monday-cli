@@ -57,8 +57,11 @@ def test_move_noop_when_already_in_target(
 def test_move_unknown_group_is_teaching_error(
     created_item: Callable[..., str],
 ) -> None:
+    """Post-FR-0008 the teaching error is emitted on stderr (stdout stays clean),
+    so assert against the captured stderr stream.
+    """
     item_id = created_item("bad-move")
-    output = run_cli(
+    stdout, stderr = run_cli(
         "items",
         "move",
         "--item-id",
@@ -66,5 +69,7 @@ def test_move_unknown_group_is_teaching_error(
         "-g",
         "no-such-group-xyz",
         expect_error=True,
+        capture_stderr=True,
     )
-    assert "Available groups" in output
+    assert "Available groups" in stderr
+    assert stdout.strip() == ""

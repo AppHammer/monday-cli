@@ -78,23 +78,37 @@ def test_status_filter_with_explicit_column(
 
 @pytest.mark.integration
 def test_multiple_status_columns_require_disambiguation(test_board_id: str) -> None:
+    """Post-FR-0008 the teaching error is emitted on stderr (stdout stays clean),
+    so assert against the captured stderr stream.
+    """
     columns = _status_columns(test_board_id)
     if len(columns) < 2:
         pytest.skip("board has a single status column; disambiguation path not exercisable")
 
     label = columns[0]["statuses"][0]["label"]
-    output = run_cli(
-        "items", "list", "--board-id", test_board_id, "--status", label, expect_error=True
+    stdout, stderr = run_cli(
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "--status",
+        label,
+        expect_error=True,
+        capture_stderr=True,
     )
     # Teaching error names every status column, never guesses.
     for column in columns:
-        assert column["column_title"] in output
+        assert column["column_title"] in stderr
+    assert stdout.strip() == ""
 
 
 @pytest.mark.integration
 def test_bad_label_lists_chosen_column_labels(test_board_id: str) -> None:
+    """Post-FR-0008 the teaching error is emitted on stderr (stdout stays clean),
+    so assert against the captured stderr stream.
+    """
     column = _status_columns(test_board_id)[0]
-    output = run_cli(
+    stdout, stderr = run_cli(
         "items",
         "list",
         "--board-id",
@@ -104,10 +118,12 @@ def test_bad_label_lists_chosen_column_labels(test_board_id: str) -> None:
         "--status-column",
         column["column_title"],
         expect_error=True,
+        capture_stderr=True,
     )
-    assert "Available statuses" in output
+    assert "Available statuses" in stderr
     # The chosen column's real labels are surfaced.
-    assert column["statuses"][0]["label"] in output
+    assert column["statuses"][0]["label"] in stderr
+    assert stdout.strip() == ""
 
 
 @pytest.mark.integration

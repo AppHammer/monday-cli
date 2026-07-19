@@ -125,107 +125,12 @@ jobs:
           fi
           echo "✓ Version propagation confirmed"
 
-      # --- --table regression guard (FR-0007 US-0007-02) ---
-      #
-      # Exercises the frozen dist/monday binary's --table path against a live
-      # Monday.com board whose item name contains a non-ASCII character.
-      # This is the only way to trigger rich._unicode_data.load() — the call that
-      # crashed pre-fix binaries with ModuleNotFoundError.  Pure-ASCII content
-      # (--help, version, etc.) stays on Rich's fast path and never triggers it.
-      #
-      # Gate: skips cleanly (exit 0) when MONDAY_API_TOKEN is absent, following
-      # the same pattern as integration.yml's "Secret gate" step.  Residual risk:
-      # if the secret is ever unset at release time, a broken binary could ship;
-      # the hermetic packaging guard in build_binary.py (_assert_rich_unicode_data_bundled)
-      # acts as an always-on backstop that catches accidental removal of the fix.
-      #
-      # Board safety: uses MONDAY_TEST_BOARD_ID (default 18422673411 — the scratch
-      # test board).  Hard-fails if it ever resolves to the PM board 18422673287.
-      # Every item created here is torn down in the cleanup step, even on failure.
-
-      - name: Table guard — secret gate
-        id: table-gate
-        env:
-          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
-        run: |
-          if [ -z "$MONDAY_API_TOKEN" ]; then
-            echo "::notice::MONDAY_API_TOKEN secret not configured — skipping --table regression guard (no failure)."
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Table guard — create non-ASCII item
-        id: table-item
-        if: steps.table-gate.outputs.run == 'true'
-        env:
-          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
-          MONDAY_TEST_BOARD_ID: ${{ vars.MONDAY_TEST_BOARD_ID || '18422673411' }}
-        run: |
-          # Board safety: refuse to run against the PM board
-          if [ "$MONDAY_TEST_BOARD_ID" = "18422673287" ]; then
-            echo "ERROR: MONDAY_TEST_BOARD_ID resolves to the PM board (18422673287). Refusing to run."
-            exit 1
-          fi
-          # Create a throwaway item whose name contains non-ASCII chars.
-          # This deterministically triggers rich._unicode_data.load() when Rich
-          # lays out the table, which is the exact call that crashed pre-fix binaries.
-          # items create always emits a success line before the JSON blob, so we
-          # extract the JSON by locating the first '{' in the mixed output.
-          ITEM_OUTPUT=$(dist/monday items create \
-            --board-id "$MONDAY_TEST_BOARD_ID" \
-            --name "pyinstaller-table-guard ✓ café" 2>&1)
-          echo "create output: $ITEM_OUTPUT"
-          ITEM_ID=$(echo "$ITEM_OUTPUT" | python3 -c "import sys,json,re; t=sys.stdin.read(); m=re.search(r'\{.*\}', t, re.S); print((json.loads(m.group(0)).get('id','')) if m else '')" 2>/dev/null || true)
-          if [ -z "$ITEM_ID" ]; then
-            echo "ERROR: Failed to create test item — cannot run table guard."
-            echo "Raw output: $ITEM_JSON"
-            exit 1
-          fi
-          echo "item-id=$ITEM_ID" >> "$GITHUB_OUTPUT"
-          echo "board-id=$MONDAY_TEST_BOARD_ID" >> "$GITHUB_OUTPUT"
-          echo "Created test item $ITEM_ID on board $MONDAY_TEST_BOARD_ID"
-
-      - name: Table guard — render --table and assert no crash
-        if: steps.table-gate.outputs.run == 'true'
-        env:
-          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
-        run: |
-          BOARD_ID="${{ steps.table-item.outputs.board-id }}"
-          echo "Running: dist/monday items list --board-id $BOARD_ID --table"
-          TABLE_OUTPUT=$(dist/monday items list --board-id "$BOARD_ID" --table 2>&1)
-          EXIT_CODE=$?
-          echo "$TABLE_OUTPUT"
-          # Assert: exit 0, no Python traceback, no ModuleNotFoundError
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "ERROR: dist/monday items list --table exited with code $EXIT_CODE"
-            exit 1
-          fi
-          if echo "$TABLE_OUTPUT" | grep -q "ModuleNotFoundError"; then
-            echo "ERROR: --table output contains ModuleNotFoundError — rich._unicode_data modules not bundled."
-            exit 1
-          fi
-          if echo "$TABLE_OUTPUT" | grep -q "Traceback"; then
-            echo "ERROR: --table output contains a Python traceback."
-            exit 1
-          fi
-          # Assert table box-drawing is present (Rich rendered a table, not raw JSON)
-          if ! echo "$TABLE_OUTPUT" | grep -qP "[─│┌┐└┘├┤┬┴┼]"; then
-            echo "WARNING: Table box-drawing characters not found — Rich may not have rendered a table."
-          fi
-          echo "Table guard PASSED: exit 0, no traceback, no ModuleNotFoundError."
-
-      - name: Table guard — cleanup (always runs)
-        if: always() && steps.table-gate.outputs.run == 'true'
-        env:
-          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
-        run: |
-          ITEM_ID="${{ steps.table-item.outputs.item-id }}"
-          if [ -n "$ITEM_ID" ]; then
-            echo "Deleting test item $ITEM_ID..."
-            dist/monday items delete --item-id "$ITEM_ID" --force 2>&1 || \
-              echo "::warning::Failed to delete test item $ITEM_ID — manual cleanup may be needed."
-          fi
+      # NOTE (FR-0013 #71): the --table regression guard has moved OUT of this
+      # job into the dedicated `table-guard` job below. It mutates the shared
+      # Monday.com TEST board, so it must serialize against integration.yml
+      # (concurrency group `monday-integration`); a job-level concurrency group
+      # is the only way to queue just the board-mutating work while this job's
+      # binary build/upload stays on the fast, immutable-tag release group.
 
       - name: Rename binary with platform suffix
         run: mv dist/monday dist/monday-linux
@@ -312,3 +217,150 @@ jobs:
             dist/monday-linux.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # --- --table regression guard (FR-0007 US-0007-02) ---
+  #
+  # Exercises the frozen dist/monday binary's --table path against a live
+  # Monday.com board whose item name contains a non-ASCII character. This is the
+  # only way to trigger rich._unicode_data.load() — the call that crashed pre-fix
+  # binaries with ModuleNotFoundError. Pure-ASCII content (--help, version, etc.)
+  # stays on Rich's fast path and never triggers it.
+  #
+  # FR-0013 #71 (AC-6): this guard MUTATES the shared Monday.com TEST board, so
+  # it runs as its own job under a JOB-LEVEL concurrency group `monday-integration`
+  # — the SAME group integration.yml uses. That serializes it against live
+  # integration runs (they queue, never collide on the 60-calls/60s limit), while
+  # the build-and-attach job's binary build/upload keeps its immutable-tag
+  # release-${{ github.ref }} group and is never blocked by an integration run.
+  # The job builds its own binary (the guard must exercise the FROZEN binary, not
+  # `python -m monday_cli`); on a rare release event the extra build is cheap
+  # relative to guaranteeing no board contention. A guard failure fails the
+  # workflow run; the always-on hermetic packaging guard in build_binary.py
+  # (_assert_rich_unicode_data_bundled) remains the independent backstop.
+  #
+  # Gate: skips cleanly (exit 0) when MONDAY_API_TOKEN is absent, following the
+  # same pattern as integration.yml's "Secret gate" step.
+  #
+  # Board safety (AC-5): uses MONDAY_TEST_BOARD_ID (default 18422673411 — the
+  # scratch test board) and hard-fails if it ever resolves to the PM board
+  # 18422673287. Every item created here is torn down in the cleanup step, even
+  # on failure.
+  table-guard:
+    name: --table regression guard (live Monday.com test board)
+    runs-on: ubuntu-latest
+    # Serialize the board-mutating guard against integration.yml. Do NOT cancel
+    # in-progress runs — a cancelled run could leave a residual item on the
+    # board; let runs queue instead (matches integration.yml).
+    concurrency:
+      group: monday-integration
+      cancel-in-progress: false
+
+    steps:
+      - name: Table guard — secret gate
+        id: table-gate
+        env:
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+        run: |
+          if [ -z "$MONDAY_API_TOKEN" ]; then
+            echo "::notice::MONDAY_API_TOKEN secret not configured — skipping --table regression guard (no failure)."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout code
+        if: steps.table-gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Set up Python 3.13
+        if: steps.table-gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        if: steps.table-gate.outputs.run == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Build binary
+        if: steps.table-gate.outputs.run == 'true'
+        run: python build/build_binary.py
+
+      - name: Table guard — create non-ASCII item
+        id: table-item
+        if: steps.table-gate.outputs.run == 'true'
+        env:
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+          MONDAY_TEST_BOARD_ID: ${{ vars.MONDAY_TEST_BOARD_ID || '18422673411' }}
+        run: |
+          # Board safety: refuse to run against the PM board
+          if [ "$MONDAY_TEST_BOARD_ID" = "18422673287" ]; then
+            echo "ERROR: MONDAY_TEST_BOARD_ID resolves to the PM board (18422673287). Refusing to run."
+            exit 1
+          fi
+          # Create a throwaway item whose name contains non-ASCII chars.
+          # This deterministically triggers rich._unicode_data.load() when Rich
+          # lays out the table, which is the exact call that crashed pre-fix binaries.
+          # items create always emits a success line before the JSON blob, so we
+          # extract the JSON by locating the first '{' in the mixed output.
+          ITEM_OUTPUT=$(dist/monday items create \
+            --board-id "$MONDAY_TEST_BOARD_ID" \
+            --name "pyinstaller-table-guard ✓ café" 2>&1)
+          echo "create output: $ITEM_OUTPUT"
+          ITEM_ID=$(echo "$ITEM_OUTPUT" | python3 -c "import sys,json,re; t=sys.stdin.read(); m=re.search(r'\{.*\}', t, re.S); print((json.loads(m.group(0)).get('id','')) if m else '')" 2>/dev/null || true)
+          if [ -z "$ITEM_ID" ]; then
+            echo "ERROR: Failed to create test item — cannot run table guard."
+            echo "Raw output: $ITEM_OUTPUT"
+            exit 1
+          fi
+          echo "item-id=$ITEM_ID" >> "$GITHUB_OUTPUT"
+          echo "board-id=$MONDAY_TEST_BOARD_ID" >> "$GITHUB_OUTPUT"
+          echo "Created test item $ITEM_ID on board $MONDAY_TEST_BOARD_ID"
+
+      - name: Table guard — render --table and assert no crash
+        if: steps.table-gate.outputs.run == 'true'
+        env:
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+        run: |
+          BOARD_ID="${{ steps.table-item.outputs.board-id }}"
+          echo "Running: dist/monday items list --board-id $BOARD_ID --table"
+          TABLE_OUTPUT=$(dist/monday items list --board-id "$BOARD_ID" --table 2>&1)
+          EXIT_CODE=$?
+          echo "$TABLE_OUTPUT"
+          # Assert: exit 0, no Python traceback, no ModuleNotFoundError
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "ERROR: dist/monday items list --table exited with code $EXIT_CODE"
+            exit 1
+          fi
+          if echo "$TABLE_OUTPUT" | grep -q "ModuleNotFoundError"; then
+            echo "ERROR: --table output contains ModuleNotFoundError — rich._unicode_data modules not bundled."
+            exit 1
+          fi
+          if echo "$TABLE_OUTPUT" | grep -q "Traceback"; then
+            echo "ERROR: --table output contains a Python traceback."
+            exit 1
+          fi
+          # Assert table box-drawing is present (Rich rendered a table, not raw JSON)
+          if ! echo "$TABLE_OUTPUT" | grep -qP "[─│┌┐└┘├┤┬┴┼]"; then
+            echo "WARNING: Table box-drawing characters not found — Rich may not have rendered a table."
+          fi
+          echo "Table guard PASSED: exit 0, no traceback, no ModuleNotFoundError."
+
+      - name: Table guard — cleanup (always runs)
+        if: always() && steps.table-gate.outputs.run == 'true'
+        env:
+          MONDAY_API_TOKEN: ${{ secrets.MONDAY_API_TOKEN }}
+        run: |
+          ITEM_ID="${{ steps.table-item.outputs.item-id }}"
+          if [ -n "$ITEM_ID" ]; then
+            echo "Deleting test item $ITEM_ID..."
+            dist/monday items delete --item-id "$ITEM_ID" --force 2>&1 || \
+              echo "::warning::Failed to delete test item $ITEM_ID — manual cleanup may be needed."
+          fi

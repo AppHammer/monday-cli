@@ -49,10 +49,37 @@ pytest tests/unit/test_foo.py::test_bar  # a single test
 
 # Live integration tests (tests/integration, marked `integration`) — run the CLI
 # end-to-end against the live API and the TEST board 18422673411. They skip
-# cleanly when MONDAY_API_TOKEN is unset and tear down every artifact even on
-# failure. The shared harness (conftest.py/helpers.py) hard-fails if the resolved
-# board is the PM board 18422673287. CI runs them per-PR via
-# .github/workflows/integration.yml (secret-gated + serialized).
+# cleanly when MONDAY_API_TOKEN is unset. The shared harness (conftest.py/
+# helpers.py) hard-fails if the resolved board is the PM board 18422673287.
+#
+# Effective isolation model (FR-0013) — the board is SHARED across overlapping
+# CI runs, so determinism comes from three cooperating layers, not from any one
+# claim of "serialized":
+#   1. Per-run namespacing: every artifact is named `it-<pid>-<rand>-...`
+#      (`run_id`); absence/presence assertions are scoped to a run's own slice,
+#      so a foreign/leaked artifact can neither satisfy nor break them.
+#   2. Failure-safe, confirmed teardown: factory fixtures delete every artifact
+#      even when a test body raises; deletes are retried and, where the API
+#      response can't be trusted (e.g. `groups delete` reports deleted:false),
+#      confirmed via a bounded list poll — unconfirmed deletes WARN, never
+#      silently leak. A session-scoped backstop sweep removes stale `it-*` items
+#      left by prior crashed runs, age-guarded via `created_at` so it can never
+#      delete a concurrently-running run's fresh artifacts.
+#   3. Bounded read-after-mutate polls: every read after a mutation uses the one
+#      consolidated `run_cli_until` helper (helpers.py), CI-tunable via
+#      MONDAY_IT_POLL_ATTEMPTS / MONDAY_IT_POLL_DELAY, to survive Monday's
+#      eventual consistency.
+#   Sweep age threshold is tunable via MONDAY_IT_SWEEP_MAX_AGE_SECONDS (default 1h).
+#
+# CI serialization: ALL board-mutating CI jobs run under the single
+# `monday-integration` concurrency group (cancel-in-progress: false, so runs
+# QUEUE rather than collide on the 60-calls/60s limit) — both
+# .github/workflows/integration.yml (workflow-level) AND release.yml's
+# `table-guard` job (job-level; release.yml's binary build/upload stays on its
+# own release-<ref> group). These two are the complete set of board-mutating
+# jobs; tests.yml / quality.yml / semantic-release.yml never touch the board.
+# Concurrency soak: dispatch integration.yml N times in parallel (workflow_dispatch)
+# and confirm the runs queue (never overlap) and all pass.
 pytest -m integration                    # only integration tests
 pytest tests/integration -m integration  # same, scoped to the folder
 MONDAY_TEST_BOARD_ID=<id> pytest -m integration  # override the test board (never the PM board)

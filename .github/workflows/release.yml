@@ -68,8 +68,7 @@ jobs:
           REPO="${{ github.repository }}"
           echo "Waiting for GitHub Release for tag $TAG ..."
           for i in $(seq 1 90); do
-            STATUS=$(gh release view "$TAG" --repo "$REPO" 2>&1 && echo "found" || echo "not_found")
-            if echo "$STATUS" | grep -q "found"; then
+            if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
               echo "✓ Release found after ${i}x10s = $((i*10))s"
               break
             fi

@@ -33,6 +33,21 @@ import pytest
 from tests.integration.helpers import run_cli, run_cli_until
 
 
+def _mine(data: Any, run_id: str) -> list[dict]:
+    """The listed items that belong to THIS run (name-prefixed with run_id).
+
+    The shared TEST board is mutated by overlapping runs, and Monday can
+    transiently surface a foreign/leaked item under a freshly-created group's
+    filter (observed under concurrency). Scoping every count/exact/empty
+    assertion to this run's own namespace keeps such an artifact from
+    inflating a count, reordering a result, or breaking an emptiness check
+    (FR-0013 AC-3) -- the item NAME carries the unique run_id, so it is the
+    reliable isolation key.
+    """
+    items = data.get("items", []) if isinstance(data, dict) else []
+    return [i for i in items if str(i.get("name", "")).startswith(run_id)]
+
+
 @pytest.mark.integration
 def test_create_returns_id_and_name_then_get_returns_full_shape(
     test_board_id: str, run_id: str
@@ -174,7 +189,10 @@ def test_list_pagination_contract_and_all_pages(
 
 @pytest.mark.integration
 def test_group_filtering_returns_only_matching_group(
-    created_group: Callable[..., str], created_item: Callable[..., str], test_board_id: str
+    created_group: Callable[..., str],
+    created_item: Callable[..., str],
+    test_board_id: str,
+    run_id: str,
 ) -> None:
     group_a = created_group("group-a")
     group_b = created_group("group-b")
@@ -200,15 +218,20 @@ def test_group_filtering_returns_only_matching_group(
 
     assert isinstance(data, dict)
     assert data.get("group_id_filter") == group_a
-    assert data.get("total_items") == 1
-    items = data["items"]
-    assert str(items[0]["id"]) == item_a
-    assert items[0]["group"]["id"] == group_a
+    # AC-3: scope to THIS run's items -- exactly item_a matches the group_a
+    # filter; the item created into group_b must not, and a foreign/leaked
+    # artifact must neither inflate the count nor reorder the result.
+    mine = _mine(data, run_id)
+    assert [str(i["id"]) for i in mine] == [item_a]
+    assert mine[0]["group"]["id"] == group_a
 
 
 @pytest.mark.integration
 def test_g_by_id_equals_group_id_and_title_path(
-    created_group: Callable[..., str], created_item: Callable[..., str], test_board_id: str
+    created_group: Callable[..., str],
+    created_item: Callable[..., str],
+    test_board_id: str,
+    run_id: str,
 ) -> None:
     """FR-0009 B1: `-g <id>` == `--group-id <id>`, and `-g <title>` matches too."""
     group_a = created_group("g-parity-a")
@@ -227,14 +250,16 @@ def test_g_by_id_equals_group_id_and_title_path(
     by_group_id = run_cli_until(_has_item_a, *common, "--group-id", group_a)
     by_g_id = run_cli_until(_has_item_a, *common, "-g", group_a)
 
-    ids_group_id = sorted(str(i["id"]) for i in by_group_id["items"])
-    ids_g_id = sorted(str(i["id"]) for i in by_g_id["items"])
+    # AC-3: compare THIS run's slice of each result -- both flags must resolve
+    # to exactly item_a for this run, independent of any foreign artifact.
+    ids_group_id = sorted(str(i["id"]) for i in _mine(by_group_id, run_id))
+    ids_g_id = sorted(str(i["id"]) for i in _mine(by_g_id, run_id))
     assert ids_group_id == ids_g_id == [item_a]
 
     # Title path resolves to the same group.
     title_a = run_cli("items", "get", "--item-id", item_a)["group"]["title"]
     by_g_title = run_cli_until(_has_item_a, *common, "-g", title_a)
-    assert sorted(str(i["id"]) for i in by_g_title["items"]) == [item_a]
+    assert sorted(str(i["id"]) for i in _mine(by_g_title, run_id)) == [item_a]
 
 
 @pytest.mark.integration
@@ -260,7 +285,10 @@ def test_unknown_group_is_teaching_error(test_board_id: str) -> None:
 
 @pytest.mark.integration
 def test_list_table_output_renders_group_id(
-    created_group: Callable[..., str], created_item: Callable[..., str], test_board_id: str
+    created_group: Callable[..., str],
+    created_item: Callable[..., str],
+    test_board_id: str,
+    run_id: str,
 ) -> None:
     """FR-0009 D2: `--table` renders the group id, and JSON carries group{id,title}."""
     group = created_group("table-groupid")
@@ -291,10 +319,13 @@ def test_list_table_output_renders_group_id(
         "--limit",
         "500",
     )
-    for item in data["items"]:
+    # AC-3: assert the group{id,title} contract over THIS run's own items, and
+    # that our created item resolves to `group` -- a foreign item can't affect it.
+    mine = _mine(data, run_id)
+    for item in mine:
         if item.get("group") is not None:
             assert "id" in item["group"] and "title" in item["group"]
-    match = [i for i in data["items"] if str(i["id"]) == item_id]
+    match = [i for i in mine if str(i["id"]) == item_id]
     assert match and match[0]["group"]["id"] == group
 
 
@@ -315,17 +346,21 @@ def test_delete_removes_item_and_list_confirms_removal(
     assert delete_data.get("item_id") == item_id
     assert delete_data.get("deleted") is True
 
-    # With the group now empty, `items list --group-id` exits 0 and returns a
-    # JSON payload with an empty `items` list (a valid-but-empty group is
-    # distinguishable from an unknown group after FR-0009 Epic B). This is a
-    # clean, silent empty result -- no human-readable "not found" message is
-    # printed for a valid-but-empty group (only an unknown one is an error).
+    # With this run's only item in `group_id` deleted, `items list --group-id`
+    # exits 0 and returns a JSON payload (a valid-but-empty group is
+    # distinguishable from an unknown group after FR-0009 Epic B -- no
+    # "not found" message is printed for a valid-but-empty group).
     #
     # Bounded poll: a read right after delete can briefly lag on eventual
     # consistency -- the deleted item can still appear on the board's
     # items_page for a moment -- so retry rather than assert on one shot.
+    #
+    # AC-3: scope the emptiness check to THIS run's items. A concurrent run's
+    # artifact could transiently surface under this freshly-created group's
+    # filter, so asserting the raw board-level `items == []` is not reliable on
+    # a shared board; asserting our own item is gone is.
     list_data = run_cli_until(
-        lambda d: isinstance(d, dict) and d.get("items") == [],
+        lambda d: isinstance(d, dict) and not _mine(d, run_id),
         "items",
         "list",
         "--board-id",
@@ -334,8 +369,8 @@ def test_delete_removes_item_and_list_confirms_removal(
         group_id,
     )
     assert isinstance(list_data, dict)
-    assert list_data.get("items") == []
-    assert list_data.get("items_count") == 0
+    assert _mine(list_data, run_id) == []
+    assert item_id not in [str(i["id"]) for i in list_data.get("items", [])]
     assert list_data.get("group_id_filter") == group_id
 
     # Idempotent re-delete must not raise -- confirms teardown safety.

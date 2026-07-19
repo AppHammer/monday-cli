@@ -6,24 +6,56 @@ from typing import TypeVar
 
 import httpx
 from tenacity import (
+    RetryCallState,
     before_sleep_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
+from tenacity.wait import wait_base
 
 from monday_cli.constants import (
     DEFAULT_RETRY_BACKOFF_FACTOR,
     DEFAULT_RETRY_MAX_ATTEMPTS,
     DEFAULT_RETRY_MAX_WAIT,
     DEFAULT_RETRY_MIN_WAIT,
+    RETRY_AFTER_BUFFER,
 )
 from monday_cli.utils.error_handler import NetworkError, RateLimitError
 
 logger = logging.getLogger("monday_cli.retry")
 
 T = TypeVar("T", bound=Callable[..., object])
+
+
+class _WaitRateLimitOrExponential(wait_base):
+    """Wait strategy that honours ``RateLimitError.retry_after``.
+
+    For ``RateLimitError`` exceptions that carry a ``retry_after`` value we
+    sleep exactly that many seconds (plus a small buffer) so the next attempt
+    arrives after Monday's reset window has elapsed.  For all other retriable
+    exceptions (network errors, timeouts) we fall back to standard exponential
+    backoff so those retries stay fast.
+    """
+
+    def __init__(self, multiplier: float, min_wait: float, max_wait: float) -> None:
+        self._exp = wait_exponential(multiplier=multiplier, min=min_wait, max=max_wait)
+        # Shared with the harness helper (_parse_retry_after) via RETRY_AFTER_BUFFER
+        # so both always add the same safety margin on top of the server's value.
+        self._retry_after_buffer = RETRY_AFTER_BUFFER
+
+    def __call__(self, retry_state: RetryCallState) -> float:
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        # Use `is not None` rather than truthiness so that an explicit
+        # Retry-After of 0 is honoured (a 0-second window still means the
+        # server acknowledged the reset; falling back to exponential would
+        # add unnecessary delay and ignore the server's intent).
+        if isinstance(exc, RateLimitError) and exc.retry_after is not None:
+            wait = float(exc.retry_after) + self._retry_after_buffer
+            logger.warning("Rate limit hit; honouring Retry-After, sleeping %.0fs", wait)
+            return wait
+        return self._exp(retry_state)
 
 
 def create_retry_decorator(
@@ -41,10 +73,10 @@ def create_retry_decorator(
     """
     return retry(
         stop=stop_after_attempt(max_attempts),
-        wait=wait_exponential(
+        wait=_WaitRateLimitOrExponential(
             multiplier=backoff_factor,
-            min=DEFAULT_RETRY_MIN_WAIT,
-            max=DEFAULT_RETRY_MAX_WAIT,
+            min_wait=DEFAULT_RETRY_MIN_WAIT,
+            max_wait=DEFAULT_RETRY_MAX_WAIT,
         ),
         retry=retry_if_exception_type(
             (

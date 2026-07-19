@@ -14,6 +14,11 @@ DEFAULT_RETRY_MAX_ATTEMPTS = 3
 DEFAULT_RETRY_BACKOFF_FACTOR = 2.0
 DEFAULT_RETRY_MIN_WAIT = 1  # seconds
 DEFAULT_RETRY_MAX_WAIT = 60  # seconds
+# Extra buffer (seconds) added on top of a Retry-After value, used both in the
+# tenacity retry decorator (_WaitRateLimitOrExponential) and in the integration-
+# test harness (_parse_retry_after).  A single constant prevents the two from
+# drifting apart.
+RETRY_AFTER_BUFFER = 2.0
 
 # Logging
 DEFAULT_LOG_LEVEL = "INFO"

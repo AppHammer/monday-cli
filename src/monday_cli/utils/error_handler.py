@@ -39,9 +39,11 @@ class RateLimitError(MondayCliError):
             retry_after: Seconds until rate limit resets
         """
         self.retry_after = retry_after
+        # Use `is not None` (not truthiness) so retry_after=0 still produces
+        # "Retry after 0s" rather than falling through to the no-value form.
         message = (
             f"Rate limit exceeded. Retry after {retry_after}s"
-            if retry_after
+            if retry_after is not None
             else "Rate limit exceeded"
         )
         super().__init__(message)

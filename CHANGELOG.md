@@ -1,7 +1,151 @@
 # CHANGELOG
 
 
-## v0.6.2 (2026-07-19)
+## v0.7.0 (2026-07-19)
+
+### Features
+
+- **FR-0009**: Group- & status-aware item operations (Closes #56-#60)
+  ([#61](https://github.com/AppHammer/monday-cli/pull/61),
+  [`0059a4c`](https://github.com/AppHammer/monday-cli/commit/0059a4ce14b702a385b9dd8adf25950d834dab05))
+
+* feat(FR-0009): group- & status-aware item operations (Closes #56,#57,#58,#59,#60)
+
+Group- and status-aware `items` commands for v0.6.3. `-g` now means the same thing (group title or
+  id, auto-detected) across list/create/move via a shared `utils/resolve.py` resolver; `--group-id`
+  stays id-only.
+
+- Epic D (#56): regression-lock group{id,title} in item JSON; add a Group ID column to `items list
+  --table`. - Epic B/B1-B2 (#57): `items list -g` accepts title OR id (was title-only, a silent
+  wrong result); unknown vs valid-but-empty group now distinguishable (teaching error exit 1 vs
+  items:[] exit 0). Adds `resolve_group_ref`. - Epic B3 (#58): widen `items create -g` from id-only
+  to title-or-id (backward compatible; CHANGELOG ### Changed). - Epic A (#59): new `monday items
+  move` command + MOVE_ITEM_TO_GROUP mutation; rejects subitems; idempotent no-op when already in
+  target group. - Epic C (#60): `items list --status` / `--status-column` client-side status
+  filtering with multi-status-column disambiguation; composes with group as AND.
+
+Bumps version to 0.6.3. Adds unit tests (mocked client) + live integration tests (TEST board only)
+  for every AC. ruff/black/mypy/pytest green.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+Claude-Session: https://claude.ai/code/session_01EQZkG1JAcnmizVKdBGQY2D
+
+* fix(items): force full pagination scan under group/status filters
+
+[code-review-fix] A group/status filter on `items list` previously only applied to the
+  already-fetched page unless `--all` was also passed, so a genuinely non-empty group/status whose
+  matches lived beyond page 1 could come back as `items: []` (exit 0) -- indistinguishable from an
+  actually empty group, breaking the #57 empty-vs-unknown guarantee. Any active `-g`/`--group`,
+  `--group-id`, or `--status` filter now forces an internal full-board scan regardless of `--all`;
+  when forced, `cursor`/`has_more` are coherent (null/false) rather than echoing the pre-filter,
+  mid-stream cursor. Progress messages ("Fetching page N...") stay gated on an explicit `--all` so a
+  filter-forced scan doesn't leak non-JSON text onto stdout.
+
+[code-review-fix] `--group-id` now validates against the board's real groups: an unknown id used to
+  silently return `items: []` (exit 0) -- it's now a teaching error listing available groups (exit
+  1), symmetric with the existing `-g`/`--group` teaching error. A valid-but-empty group id is
+  unaffected.
+
+[qa-fix] `items list` JSON now always echoes the RESOLVED group id under the single stable
+  `group_id_filter` key, regardless of whether -g/--group or --group-id was used. Previously only
+  --group-id populated that key; -g only echoed the raw, unresolved input under `group_filter`. Both
+  keys are preserved (nothing renamed or removed) so existing consumers of either key keep working.
+
+Adds tests/unit/test_items_list_filter_pagination.py covering all three findings with mocked
+  multi-page responses, plus a CHANGELOG update to keep the in-flight v0.6.3 entry accurate.
+
+* test(items): add command-level items-get group{id,title} coverage
+
+[code-review-fix] `items get`'s group{id,title} guarantee (Epic D, #56) was only regression-locked
+  at the query-string regex level; `items list` already had a command-level assertion via a mocked
+  client. Adds the symmetric command-level tests for `items get`: one asserting the emitted JSON
+  contains group: {id, title}, and a null-group case asserting null-safety, matching the existing
+  items-list tests in the same file.
+
+* fix(tests): harden integration teardown against transient delete failures
+
+[qa-fix] QA Bug 2: test_g_by_id_equals_group_id_and_title_path left 2 groups + 2 items on the live
+  shared TEST board because `_swallow_not_found` ran the teardown delete with expect_error=True and
+  unconditionally discarded the result -- a transient API blip (rate limit / network hiccup) was
+  swallowed identically to "already gone", with no retry, so a real teardown failure could leak
+  silently. CLAUDE.md requires integration tests to "tear down every artifact even on failure".
+
+`_swallow_not_found` now distinguishes a genuine not-found/already-deleted response (an error
+  message containing "not found", or exit 0 -- both swallowed unconditionally) from any other
+  failure, which is retried up to 3 times with a short backoff. If the artifact still can't be
+  confirmed deleted after retries, it surfaces a pytest warning instead of silently passing, so a
+  real leak on the shared board is visible rather than hidden. Teardown itself still never raises
+  (an unexpected exception from run_cli is caught and folded into the same retry path), so one
+  artifact's failed teardown can't abort a sibling fixture's teardown in the same test.
+
+Does not touch `groups delete` command behavior or the DELETE_GROUP mutation (QA Bug 1 is out of
+  scope, already filed separately).
+
+Adds tests/integration/test_teardown_hardening.py, which monkeypatches run_cli to exercise the
+  not-found/success/transient-retry/exhausted-warn/ raised-exception paths without live API traffic.
+  Verified against the live TEST board: the FR-0009 items integration suite (including the
+  previously-leaking test) passes with zero leaked groups/items afterward.
+
+* fix(FR-0009): round-2 code-review fixes for pull request 61
+
+- items list: ignore --cursor whenever a group/status filter is active so the forced full-board scan
+  always starts from page 1 -- a filter match preceding a caller-supplied cursor can no longer be
+  missed. - items list: hoist group/status filter resolution + validation above the multi-page
+  pagination loop so an invalid --group/--group-id/ --status fails fast (exit 1) without first
+  burning the paginated page-fetch budget on a request whose result is discarded anyway. - Move the
+  teardown-hardening meta-tests (zero live API calls) from tests/integration to tests/unit and drop
+  their integration marker, so they run in every token-less `pytest tests/unit` invocation instead
+  of being skipped by the secret-gated CI job. - De-flake test_list_table_output_renders_group_id
+  with a bounded read-after-write poll, matching the existing pattern in test_items_status.py, to
+  absorb eventual-consistency lag on a freshly created item.
+
+* fix(tests): assert teaching error on stderr in test_unknown_group_is_teaching_error
+
+Post-FR-0008 the CLI emits the "Available groups" teaching error on stderr and keeps stdout clean,
+  but this test (predating that merge) still asserted the message against stdout. Capture stderr via
+  run_cli(..., capture_stderr=True) and assert on it, plus lock the clean-stdout contract
+  explicitly.
+
+Swept the other FR-0009 integration tests for the same stale pattern; test_items_move.py and
+  test_items_status.py have the identical issue but are already being fixed in a concurrent
+  worktree, so left untouched here to avoid a duplicate/conflicting commit.
+
+* fix(tests): assert FR-0009 teaching errors on stderr, not stdout
+
+Post-FR-0008, teaching-error text (unknown group, status disambiguation, bad status label) is
+  correctly emitted on stderr with stdout kept clean. Three FR-0009 integration tests were still
+  asserting that text against stdout and therefore failing. Mirror the fix already applied to
+  test_items.py::test_unknown_group_is_teaching_error: capture stderr via run_cli(...,
+  capture_stderr=True) and assert the teaching text there, plus lock down that stdout is empty on
+  these error paths.
+
+* fix(tests): harden read-after-mutate races in FR-0009 integration tests
+
+test_delete_removes_item_and_list_confirms_removal polled a single post-delete `items list` call,
+  which intermittently failed on a live eventual-consistency race (the deleted item can briefly
+  still appear on the board's items_page). Switch it to the existing `_run_cli_until` bounded-poll
+  helper.
+
+Sweep of the three FR-0009 integration files turned up sibling races of the same shape -- a list/get
+  read immediately after a create/move, asserting the mutation had already propagated: -
+  test_list_pagination_contract_and_all_pages: the `--all` read asserting both newly-created items
+  are present. - test_group_filtering_returns_only_matching_group: the group-filtered `--all` read
+  asserting the newly-created item is present. - test_g_by_id_equals_group_id_and_title_path: all
+  three group-filter variants (--group-id / -g id / -g title) reading the newly-created item. -
+  test_move_between_groups_by_id_then_back_by_title (test_items_move.py): the post-move `items get`
+  asserting the new group id (added a local `_run_cli_until` mirroring the existing pattern).
+
+Test-only change; no product code touched.
+
+---------
+
+Co-authored-by: Michael Fudge <mafudge@gmail.com>
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+
+## v0.6.2 (2026-07-18)
 
 ### Bug Fixes
 

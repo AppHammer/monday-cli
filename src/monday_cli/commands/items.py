@@ -15,7 +15,7 @@ from monday_cli.client.queries import (
     GET_NEXT_ITEMS_PAGE,
 )
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
-from monday_cli.utils.output import print_json
+from monday_cli.utils.output import print_json, secho_err
 
 
 @items_app.command("get")
@@ -37,11 +37,11 @@ def get_item(
     """
     try:
         if item_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Item ID is required. Use --item-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday items get --item-id 1234567890", fg=typer.colors.BLUE)
+            secho_err("Example: monday items get --item-id 1234567890", fg=typer.colors.BLUE)
             raise typer.Exit(1)
 
         client = get_client()
@@ -49,25 +49,25 @@ def get_item(
 
         items = result.get("items", [])
         if not items:
-            typer.secho(f"Item {item_id} not found", fg=typer.colors.YELLOW)
+            secho_err(f"Item {item_id} not found", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         print_json(items[0])
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -97,22 +97,22 @@ def create_item(
     """
     try:
         if board_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Board ID is required. Use --board-id",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 'Example: monday items create --board-id 1234567890 --name "New Task"',
                 fg=typer.colors.BLUE,
             )
             raise typer.Exit(1)
 
         if item_name is None:
-            typer.secho(
+            secho_err(
                 "Error: Item name is required. Use --name",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 'Example: monday items create --board-id 1234567890 --name "New Task"',
                 fg=typer.colors.BLUE,
             )
@@ -128,7 +128,7 @@ def create_item(
                 # Monday.com expects column_values as a JSON string
                 column_values_str = json.dumps(column_values_dict)
             except json.JSONDecodeError as e:
-                typer.secho(f"Error: Invalid JSON in column-values: {str(e)}", fg=typer.colors.RED)
+                secho_err(f"Error: Invalid JSON in column-values: {str(e)}", fg=typer.colors.RED)
                 raise typer.Exit(1)
         else:
             column_values_str = None
@@ -146,26 +146,26 @@ def create_item(
         created_item = result.get("create_item")
 
         if created_item:
-            typer.secho("✓ Item created successfully!", fg=typer.colors.GREEN)
+            secho_err("✓ Item created successfully!", fg=typer.colors.GREEN)
             print_json(created_item)
         else:
-            typer.secho("Error: Failed to create item", fg=typer.colors.RED)
+            secho_err("Error: Failed to create item", fg=typer.colors.RED)
             raise typer.Exit(1)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -191,33 +191,33 @@ def update_item(
     """
     try:
         if item_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Item ID is required. Use --item-id",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 'Example: monday items update --item-id 1234567890 --title "Status" --value "Done"',
                 fg=typer.colors.BLUE,
             )
             raise typer.Exit(1)
 
         if title is None:
-            typer.secho(
+            secho_err(
                 "Error: Column title is required. Use --title",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 'Example: monday items update --item-id 1234567890 --title "Status" --value "Done"',
                 fg=typer.colors.BLUE,
             )
             raise typer.Exit(1)
 
         if value is None:
-            typer.secho(
+            secho_err(
                 "Error: Value is required. Use --value",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 'Example: monday items update --item-id 1234567890 --title "Status" --value "Done"',
                 fg=typer.colors.BLUE,
             )
@@ -230,14 +230,14 @@ def update_item(
         items = result.get("items", [])
 
         if not items:
-            typer.secho(f"Item {item_id} not found", fg=typer.colors.YELLOW)
+            secho_err(f"Item {item_id} not found", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         item = items[0]
         board = item.get("board")
 
         if not board:
-            typer.secho("Error: Could not determine board for item", fg=typer.colors.RED)
+            secho_err("Error: Could not determine board for item", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         board_id = board["id"]
@@ -247,7 +247,7 @@ def update_item(
 
         boards = columns_result.get("boards", [])
         if not boards:
-            typer.secho("Error: Could not fetch board columns", fg=typer.colors.RED)
+            secho_err("Error: Could not fetch board columns", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         board_data = boards[0]
@@ -263,11 +263,11 @@ def update_item(
 
         if not target_column:
             available_titles = ", ".join(f"'{col['title']}'" for col in columns)
-            typer.secho(
+            secho_err(
                 f"Error: Column with title '{title}' not found on board {board_id}",
                 fg=typer.colors.RED,
             )
-            typer.secho(f"Available columns: {available_titles}", fg=typer.colors.YELLOW)
+            secho_err(f"Available columns: {available_titles}", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         column_id = target_column["id"]
@@ -280,7 +280,7 @@ def update_item(
             # For status columns, find the index for the given label
             settings_str = target_column.get("settings_str")
             if not settings_str:
-                typer.secho(
+                secho_err(
                     f"Error: Status column '{title}' has no status options configured",
                     fg=typer.colors.RED,
                 )
@@ -290,7 +290,7 @@ def update_item(
                 settings = json.loads(settings_str)
                 labels = settings.get("labels", {})
             except json.JSONDecodeError:
-                typer.secho("Error: Could not parse column settings", fg=typer.colors.RED)
+                secho_err("Error: Could not parse column settings", fg=typer.colors.RED)
                 raise typer.Exit(1)
 
             # Find the status index for the given label (case-insensitive)
@@ -304,10 +304,11 @@ def update_item(
 
             if status_index is None:
                 available_labels = ", ".join(f"'{label}'" for label in labels.values())
-                typer.secho(
-                    f"Error: Status '{value}' not found in column '{title}'", fg=typer.colors.RED
+                secho_err(
+                    f"Error: Status '{value}' not found in column '{title}'",
+                    fg=typer.colors.RED,
                 )
-                typer.secho(f"Available statuses: {available_labels}", fg=typer.colors.YELLOW)
+                secho_err(f"Available statuses: {available_labels}", fg=typer.colors.YELLOW)
                 raise typer.Exit(1)
 
             formatted_value = json.dumps({"index": status_index})
@@ -355,28 +356,29 @@ def update_item(
         updated_item = update_result.get("change_column_value")
 
         if updated_item:
-            typer.secho(
-                f"✓ Item column '{title}' updated to '{value}' successfully!", fg=typer.colors.GREEN
+            secho_err(
+                f"✓ Item column '{title}' updated to '{value}' successfully!",
+                fg=typer.colors.GREEN,
             )
             print_json(updated_item)
         else:
-            typer.secho("Error: Failed to update item column", fg=typer.colors.RED)
+            secho_err("Error: Failed to update item column", fg=typer.colors.RED)
             raise typer.Exit(1)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -394,11 +396,11 @@ def list_columns(
     """
     try:
         if item_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Item ID is required. Use --item-id",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 "Example: monday items list-columns --item-id 1234567890", fg=typer.colors.BLUE
             )
             raise typer.Exit(1)
@@ -410,14 +412,14 @@ def list_columns(
         items = result.get("items", [])
 
         if not items:
-            typer.secho(f"Item {item_id} not found", fg=typer.colors.YELLOW)
+            secho_err(f"Item {item_id} not found", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         item = items[0]
         board = item.get("board")
 
         if not board:
-            typer.secho("Error: Could not determine board for item", fg=typer.colors.RED)
+            secho_err("Error: Could not determine board for item", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         board_id = board["id"]
@@ -428,7 +430,7 @@ def list_columns(
 
         boards = columns_result.get("boards", [])
         if not boards:
-            typer.secho("Error: Could not fetch board columns", fg=typer.colors.RED)
+            secho_err("Error: Could not fetch board columns", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         board_data = boards[0]
@@ -465,19 +467,19 @@ def list_columns(
         print_json(output)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -538,17 +540,17 @@ def list_items(
         final_board_id = board_id_opt if board_id_opt is not None else board_id
 
         if final_board_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Board ID is required. Provide it as an argument or use --board-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday items list 1234567890", fg=typer.colors.BLUE)
-            typer.secho("Example: monday items list --board-id 1234567890", fg=typer.colors.BLUE)
+            secho_err("Example: monday items list 1234567890", fg=typer.colors.BLUE)
+            secho_err("Example: monday items list --board-id 1234567890", fg=typer.colors.BLUE)
             raise typer.Exit(1)
 
         # Validate limit
         if limit < 1 or limit > 500:
-            typer.secho(
+            secho_err(
                 "Error: Limit must be between 1 and 500",
                 fg=typer.colors.RED,
             )
@@ -556,7 +558,7 @@ def list_items(
 
         # Validate that both group filters aren't used together
         if group and group_id:
-            typer.secho(
+            secho_err(
                 "Error: Cannot use both --group and --group-id together. Choose one.",
                 fg=typer.colors.RED,
             )
@@ -577,7 +579,7 @@ def list_items(
 
         boards = result.get("boards", [])
         if not boards:
-            typer.secho(
+            secho_err(
                 f"Board {final_board_id} not found or you don't have access",
                 fg=typer.colors.YELLOW,
             )
@@ -588,15 +590,15 @@ def list_items(
 
         # Check if this is a subitems board - REFUSE to list subitems
         if "subitems of" in board_name.lower():
-            typer.secho(
+            secho_err(
                 f"Error: Board '{board_name}' is a subitems board.",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 f"Use 'monday subitems list --board-id {final_board_id}' to list subitems.",
                 fg=typer.colors.BLUE,
             )
-            typer.secho(
+            secho_err(
                 "The 'items list' command is for listing main items/tasks"
                 " from regular boards only.",
                 fg=typer.colors.YELLOW,
@@ -610,14 +612,14 @@ def list_items(
         # If --all flag is set, fetch all pages
         pages_fetched = 1
         if all_pages and next_cursor:
-            typer.secho(
+            secho_err(
                 f"Fetching page {pages_fetched}... ({len(all_items)} items)",
                 fg=typer.colors.BLUE,
             )
 
             while next_cursor:
                 pages_fetched += 1
-                typer.secho(
+                secho_err(
                     f"Fetching page {pages_fetched}...",
                     fg=typer.colors.BLUE,
                 )
@@ -632,14 +634,14 @@ def list_items(
                 all_items.extend(page_items)
                 next_cursor = next_page.get("cursor")
 
-                typer.secho(
+                secho_err(
                     f"  Total items so far: {len(all_items)}",
                     fg=typer.colors.BLUE,
                 )
 
                 # Safety check to prevent infinite loops
                 if pages_fetched > 1000:
-                    typer.secho(
+                    secho_err(
                         "Warning: Reached maximum page limit (1000). Stopping pagination.",
                         fg=typer.colors.YELLOW,
                     )
@@ -669,20 +671,46 @@ def list_items(
 
             filtered_count = len(all_items)
             if filtered_count == 0:
-                typer.secho(
+                # US-0008-05: emit valid JSON (empty items array) instead of prose + Exit(0)
+                # An empty result is a successful query; the tip goes to stderr.
+                secho_err(
                     f"No items found in group '{group or group_id}' on board {final_board_id}",
                     fg=typer.colors.YELLOW,
                 )
-                typer.secho(
-                    f"Tip: Use 'monday groups list {final_board_id}' to see available groups",
+                secho_err(
+                    f"Tip: Use 'monday groups list --board-id {final_board_id}'"
+                    " to see available groups",
                     fg=typer.colors.BLUE,
                 )
+                # Return valid JSON with an empty items array
+                if all_pages:
+                    empty_output = {
+                        "board_id": str(final_board_id),
+                        "board_name": board_name,
+                        "items": [],
+                        "total_items": 0,
+                        "pages_fetched": pages_fetched,
+                    }
+                else:
+                    empty_output = {
+                        "board_id": str(final_board_id),
+                        "board_name": board_name,
+                        "items": [],
+                        "cursor": None,
+                        "has_more": False,
+                        "items_count": 0,
+                    }
+                if group:
+                    empty_output["group_filter"] = group
+                if group_id:
+                    empty_output["group_id_filter"] = group_id
+                print_json(empty_output)
                 raise typer.Exit(0)
 
             # Show filter info when fetching multiple pages
             if all_pages and original_count != filtered_count:
                 group_label = group or group_id
-                typer.secho(
+                secho_err(
                     f"Filtered {original_count} items to {filtered_count} in group '{group_label}'",
                     fg=typer.colors.GREEN,
                 )
@@ -728,7 +756,7 @@ def list_items(
 
             console.print(rich_table)
 
-            # Show summary info
+            # Show summary info (table mode -- stdout is human output)
             if all_pages:
                 typer.secho(
                     f"\nTotal items: {len(all_items)} (fetched {pages_fetched} pages)",
@@ -773,19 +801,19 @@ def list_items(
     except typer.Exit:
         raise
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -808,11 +836,11 @@ def delete_item(
     """
     try:
         if item_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Item ID is required. Use --item-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday items delete --item-id 1234567890", fg=typer.colors.BLUE)
+            secho_err("Example: monday items delete --item-id 1234567890", fg=typer.colors.BLUE)
             raise typer.Exit(1)
 
         client = get_client()
@@ -822,7 +850,7 @@ def delete_item(
         items = result.get("items", [])
 
         if not items:
-            typer.secho(f"Item {item_id} not found", fg=typer.colors.YELLOW)
+            secho_err(f"Item {item_id} not found", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         item = items[0]
@@ -832,15 +860,15 @@ def delete_item(
 
         # Confirmation prompt (unless --force is used)
         if not force:
-            typer.secho(
+            secho_err(
                 f"WARNING: This will permanently delete item '{item_name}'"
                 f" (ID: {item_id}) from board '{board_name}'!",
                 fg=typer.colors.YELLOW,
             )
-            typer.secho("This action cannot be undone.", fg=typer.colors.RED)
-            confirm_delete = typer.confirm("Are you sure you want to continue?")
+            secho_err("This action cannot be undone.", fg=typer.colors.RED)
+            confirm_delete = typer.confirm("Are you sure you want to continue?", err=True)
             if not confirm_delete:
-                typer.secho("Delete cancelled.", fg=typer.colors.BLUE)
+                secho_err("Delete cancelled.", fg=typer.colors.BLUE)
                 raise typer.Exit(0)
 
         # Execute delete mutation
@@ -849,8 +877,9 @@ def delete_item(
         deleted_item = delete_result.get("delete_item")
 
         if deleted_item:
-            typer.secho(
-                f"✓ Item '{item_name}' (ID: {item_id}) deleted successfully!", fg=typer.colors.GREEN
+            secho_err(
+                f"✓ Item '{item_name}' (ID: {item_id}) deleted successfully!",
+                fg=typer.colors.GREEN,
             )
             output = {
                 "item_id": str(item_id),
@@ -862,13 +891,13 @@ def delete_item(
         else:
             # Deletion may have succeeded but returned no data
             # Verify by trying to fetch the item again
-            typer.secho("Verifying deletion...", fg=typer.colors.YELLOW)
+            secho_err("Verifying deletion...", fg=typer.colors.YELLOW)
             verify_result = client.execute_query(GET_ITEM_BY_ID, {"itemIds": [str(item_id)]})
             verify_items = verify_result.get("items", [])
 
             if not verify_items:
                 # Item is gone, deletion succeeded
-                typer.secho(
+                secho_err(
                     f"✓ Item '{item_name}' (ID: {item_id}) deleted successfully!",
                     fg=typer.colors.GREEN,
                 )
@@ -880,21 +909,21 @@ def delete_item(
                 }
                 print_json(output)
             else:
-                typer.secho("Error: Failed to delete item", fg=typer.colors.RED)
+                secho_err("Error: Failed to delete item", fg=typer.colors.RED)
                 raise typer.Exit(1)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)

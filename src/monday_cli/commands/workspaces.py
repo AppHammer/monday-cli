@@ -9,7 +9,7 @@ from rich.table import Table
 from monday_cli.cli import get_client, workspaces_app
 from monday_cli.client.queries import GET_WORKSPACES
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
-from monday_cli.utils.output import print_json
+from monday_cli.utils.output import print_json, secho_err
 
 
 @workspaces_app.command("list")
@@ -49,7 +49,7 @@ def list_workspaces(
         valid_membership_kinds = ["all", "member"]
         if membership_kind and membership_kind.lower() not in valid_membership_kinds:
             valid_opts = ", ".join(valid_membership_kinds)
-            typer.secho(
+            secho_err(
                 f"Error: Invalid membership-kind '{membership_kind}'. Valid options: {valid_opts}",
                 fg=typer.colors.RED,
             )
@@ -74,7 +74,7 @@ def list_workspaces(
                 ids = [id.strip() for id in workspace_ids.split(",")]
                 variables["ids"] = ids
             except Exception as e:
-                typer.secho(
+                secho_err(
                     f"Error: Invalid workspace IDs format: {str(e)}",
                     fg=typer.colors.RED,
                 )
@@ -85,8 +85,8 @@ def list_workspaces(
         workspaces = result.get("workspaces", [])
 
         if not workspaces:
-            typer.secho("No workspaces found matching your criteria.", fg=typer.colors.YELLOW)
-            typer.secho(
+            secho_err("No workspaces found matching your criteria.", fg=typer.colors.YELLOW)
+            secho_err(
                 "Tip: Try 'monday workspaces list --membership-kind all'"
                 " to see all accessible workspaces",
                 fg=typer.colors.BLUE,
@@ -141,17 +141,17 @@ def list_workspaces(
             print_json(output)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)

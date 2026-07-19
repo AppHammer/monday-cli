@@ -9,7 +9,7 @@ from rich.table import Table
 from monday_cli.cli import boards_app, get_client
 from monday_cli.client.queries import GET_BOARDS
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
-from monday_cli.utils.output import print_json
+from monday_cli.utils.output import print_json, secho_err
 
 
 @boards_app.command("list")
@@ -49,7 +49,7 @@ def list_boards(
         # Validate state parameter
         valid_states = ["active", "archived", "deleted", "all"]
         if state and state.lower() not in valid_states:
-            typer.secho(
+            secho_err(
                 f"Error: Invalid state '{state}'. Valid options: {', '.join(valid_states)}",
                 fg=typer.colors.RED,
             )
@@ -104,8 +104,8 @@ def list_boards(
             ]
 
         if not boards:
-            typer.secho("No boards found matching your criteria.", fg=typer.colors.YELLOW)
-            typer.secho(
+            secho_err("No boards found matching your criteria.", fg=typer.colors.YELLOW)
+            secho_err(
                 "Tip: Try 'monday boards list --state all' to see archived boards",
                 fg=typer.colors.BLUE,
             )
@@ -166,17 +166,17 @@ def list_boards(
             print_json(output)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)

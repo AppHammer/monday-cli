@@ -6,7 +6,7 @@ from monday_cli.cli import get_client, updates_app
 from monday_cli.client.mutations import CREATE_UPDATE
 from monday_cli.client.queries import GET_ITEM_UPDATES
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
-from monday_cli.utils.output import print_json
+from monday_cli.utils.output import print_json, secho_err
 
 
 @updates_app.command("get")
@@ -23,11 +23,11 @@ def get_updates(
     """
     try:
         if item_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Item ID is required. Use --item-id",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday updates get --item-id 1234567890", fg=typer.colors.BLUE)
+            secho_err("Example: monday updates get --item-id 1234567890", fg=typer.colors.BLUE)
             raise typer.Exit(1)
 
         client = get_client()
@@ -37,25 +37,25 @@ def get_updates(
 
         items = result.get("items", [])
         if not items:
-            typer.secho(f"No item found with ID {item_id}", fg=typer.colors.YELLOW)
+            secho_err(f"No item found with ID {item_id}", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         print_json(items[0])
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -75,22 +75,22 @@ def create_update(
     """
     try:
         if item_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Item ID is required. Use --item-id",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 'Example: monday updates create --item-id 1234567890 --body "Work in progress"',
                 fg=typer.colors.BLUE,
             )
             raise typer.Exit(1)
 
         if body is None:
-            typer.secho(
+            secho_err(
                 "Error: Body text is required. Use --body",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 'Example: monday updates create --item-id 1234567890 --body "Work in progress"',
                 fg=typer.colors.BLUE,
             )
@@ -107,24 +107,24 @@ def create_update(
         created_update = result.get("create_update")
 
         if created_update:
-            typer.secho("✓ Update created successfully!", fg=typer.colors.GREEN)
+            secho_err("✓ Update created successfully!", fg=typer.colors.GREEN)
             print_json(created_update)
         else:
-            typer.secho("Error: Failed to create update", fg=typer.colors.RED)
+            secho_err("Error: Failed to create update", fg=typer.colors.RED)
             raise typer.Exit(1)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)

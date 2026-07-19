@@ -16,7 +16,7 @@ from monday_cli.client.queries import (
     GET_NEXT_ITEMS_PAGE,
 )
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
-from monday_cli.utils.output import print_json
+from monday_cli.utils.output import print_json, secho_err
 
 
 @subitems_app.command("get")
@@ -29,8 +29,8 @@ def get_subitem(
         monday subitems get --subitem-id 1234567890
     """
     if subitem_id is None:
-        typer.secho("Error: --subitem-id is required", fg=typer.colors.RED)
-        typer.secho("Usage: monday subitems get --subitem-id <id>", fg=typer.colors.BLUE)
+        secho_err("Error: --subitem-id is required", fg=typer.colors.RED)
+        secho_err("Usage: monday subitems get --subitem-id <id>", fg=typer.colors.BLUE)
         raise typer.Exit(1)
 
     try:
@@ -39,25 +39,25 @@ def get_subitem(
         items = result.get("items", [])
 
         if not items:
-            typer.secho(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
+            secho_err(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         print_json(items[0])
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -101,16 +101,16 @@ def list_subitems(
     """
     try:
         if item_id is None and board_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Either --item-id or --board-id is required",
                 fg=typer.colors.RED,
             )
-            typer.secho("Example: monday subitems list --item-id 1234567890", fg=typer.colors.BLUE)
-            typer.secho("Example: monday subitems list --board-id 1234567890", fg=typer.colors.BLUE)
+            secho_err("Example: monday subitems list --item-id 1234567890", fg=typer.colors.BLUE)
+            secho_err("Example: monday subitems list --board-id 1234567890", fg=typer.colors.BLUE)
             raise typer.Exit(1)
 
         if item_id is not None and board_id is not None:
-            typer.secho(
+            secho_err(
                 "Error: Cannot use both --item-id and --board-id. Choose one.",
                 fg=typer.colors.RED,
             )
@@ -124,7 +124,7 @@ def list_subitems(
             items = result.get("items", [])
 
             if not items:
-                typer.secho(f"Item {item_id} not found", fg=typer.colors.YELLOW)
+                secho_err(f"Item {item_id} not found", fg=typer.colors.YELLOW)
                 raise typer.Exit(1)
 
             item = items[0]
@@ -132,8 +132,16 @@ def list_subitems(
             subitems = item.get("subitems", [])
 
             if not subitems:
-                typer.secho(
+                secho_err(
                     f"No subitems found for item {item_id} ({item_name})", fg=typer.colors.YELLOW
+                )
+                print_json(
+                    {
+                        "parent_item_id": str(item_id),
+                        "parent_item_name": item_name,
+                        "subitems": [],
+                        "total_subitems": 0,
+                    }
                 )
                 raise typer.Exit(0)
 
@@ -191,7 +199,7 @@ def list_subitems(
         else:
             # Validate limit
             if limit < 1 or limit > 500:
-                typer.secho(
+                secho_err(
                     "Error: Limit must be between 1 and 500",
                     fg=typer.colors.RED,
                 )
@@ -210,7 +218,7 @@ def list_subitems(
 
             boards = result.get("boards", [])
             if not boards:
-                typer.secho(
+                secho_err(
                     f"Board {board_id} not found or you don't have access",
                     fg=typer.colors.YELLOW,
                 )
@@ -245,9 +253,17 @@ def list_subitems(
                 next_cursor = None
 
                 if not all_subitems:
-                    typer.secho(
+                    secho_err(
                         f"No subitems found on board '{board_name}' (ID: {board_id})",
                         fg=typer.colors.YELLOW,
+                    )
+                    print_json(
+                        {
+                            "board_id": str(board_id),
+                            "board_name": board_name,
+                            "subitems": [],
+                            "total_subitems": 0,
+                        }
                     )
                     raise typer.Exit(0)
             else:
@@ -260,14 +276,14 @@ def list_subitems(
             # (only supported for subitems boards, not main boards)
             pages_fetched = 1
             if all_pages and next_cursor:
-                typer.secho(
+                secho_err(
                     f"Fetching page {pages_fetched}... ({len(all_subitems)} subitems)",
                     fg=typer.colors.BLUE,
                 )
 
                 while next_cursor:
                     pages_fetched += 1
-                    typer.secho(
+                    secho_err(
                         f"Fetching page {pages_fetched}...",
                         fg=typer.colors.BLUE,
                     )
@@ -282,14 +298,14 @@ def list_subitems(
                     all_subitems.extend(page_items)
                     next_cursor = next_page.get("cursor")
 
-                    typer.secho(
+                    secho_err(
                         f"  Total subitems so far: {len(all_subitems)}",
                         fg=typer.colors.BLUE,
                     )
 
                     # Safety check to prevent infinite loops
                     if pages_fetched > 1000:
-                        typer.secho(
+                        secho_err(
                             "Warning: Reached maximum page limit (1000). Stopping pagination.",
                             fg=typer.colors.YELLOW,
                         )
@@ -386,19 +402,19 @@ def list_subitems(
                 print_json(output)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -425,22 +441,22 @@ def create_subitem(
     """
     try:
         if parent_item_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Parent item ID is required. Use --parent-item-id",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 'Example: monday subitems create --parent-item-id 1234567890 --name "New Subtask"',
                 fg=typer.colors.BLUE,
             )
             raise typer.Exit(1)
 
         if subitem_name is None:
-            typer.secho(
+            secho_err(
                 "Error: Subitem name is required. Use --name",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 'Example: monday subitems create --parent-item-id 1234567890 --name "New Subtask"',
                 fg=typer.colors.BLUE,
             )
@@ -456,7 +472,7 @@ def create_subitem(
                 # Monday.com expects column_values as a JSON string
                 column_values_str = json.dumps(column_values_dict)
             except json.JSONDecodeError as e:
-                typer.secho(f"Error: Invalid JSON in column-values: {str(e)}", fg=typer.colors.RED)
+                secho_err(f"Error: Invalid JSON in column-values: {str(e)}", fg=typer.colors.RED)
                 raise typer.Exit(1)
         else:
             column_values_str = None
@@ -471,26 +487,26 @@ def create_subitem(
         created_subitem = result.get("create_subitem")
 
         if created_subitem:
-            typer.secho("✓ Subitem created successfully!", fg=typer.colors.GREEN)
+            secho_err("✓ Subitem created successfully!", fg=typer.colors.GREEN)
             print_json(created_subitem)
         else:
-            typer.secho("Error: Failed to create subitem", fg=typer.colors.RED)
+            secho_err("Error: Failed to create subitem", fg=typer.colors.RED)
             raise typer.Exit(1)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -508,11 +524,11 @@ def list_columns(
     """
     try:
         if subitem_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Subitem ID is required. Use --subitem-id",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 "Example: monday subitems list-columns --subitem-id 9999999999",
                 fg=typer.colors.BLUE,
             )
@@ -525,14 +541,14 @@ def list_columns(
         items = result.get("items", [])
 
         if not items:
-            typer.secho(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
+            secho_err(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         subitem = items[0]
         board = subitem.get("board")
 
         if not board:
-            typer.secho("Error: Could not determine board for subitem", fg=typer.colors.RED)
+            secho_err("Error: Could not determine board for subitem", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         board_id = board["id"]
@@ -543,7 +559,7 @@ def list_columns(
 
         boards = columns_result.get("boards", [])
         if not boards:
-            typer.secho("Error: Could not fetch board columns", fg=typer.colors.RED)
+            secho_err("Error: Could not fetch board columns", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         board_data = boards[0]
@@ -580,19 +596,19 @@ def list_columns(
         print_json(output)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -610,11 +626,11 @@ def list_statuses(
     """
     try:
         if subitem_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Subitem ID is required. Use --subitem-id",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 "Example: monday subitems list-statuses --subitem-id 9999999999",
                 fg=typer.colors.BLUE,
             )
@@ -627,14 +643,14 @@ def list_statuses(
         items = result.get("items", [])
 
         if not items:
-            typer.secho(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
+            secho_err(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         subitem = items[0]
         board = subitem.get("board")
 
         if not board:
-            typer.secho("Error: Could not determine board for subitem", fg=typer.colors.RED)
+            secho_err("Error: Could not determine board for subitem", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         board_id = board["id"]
@@ -645,7 +661,7 @@ def list_statuses(
 
         boards = columns_result.get("boards", [])
         if not boards:
-            typer.secho("Error: Could not fetch board columns", fg=typer.colors.RED)
+            secho_err("Error: Could not fetch board columns", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         board_data = boards[0]
@@ -677,7 +693,7 @@ def list_statuses(
                     continue
 
         if not status_columns:
-            typer.secho(
+            secho_err(
                 f"No status columns found on board '{board_name}' (ID: {board_id})",
                 fg=typer.colors.YELLOW,
             )
@@ -694,19 +710,19 @@ def list_statuses(
         print_json(output)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -732,11 +748,11 @@ def update_subitem(
     """
     try:
         if subitem_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Subitem ID is required. Use --subitem-id",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 "Example: monday subitems update --subitem-id 9999999999"
                 ' --title "Status" --value "Ready For Work"',
                 fg=typer.colors.BLUE,
@@ -744,11 +760,11 @@ def update_subitem(
             raise typer.Exit(1)
 
         if title is None:
-            typer.secho(
+            secho_err(
                 "Error: Column title is required. Use --title",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 "Example: monday subitems update --subitem-id 9999999999"
                 ' --title "Status" --value "Ready For Work"',
                 fg=typer.colors.BLUE,
@@ -756,11 +772,11 @@ def update_subitem(
             raise typer.Exit(1)
 
         if value is None:
-            typer.secho(
+            secho_err(
                 "Error: Value is required. Use --value",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 "Example: monday subitems update --subitem-id 9999999999"
                 ' --title "Status" --value "Ready For Work"',
                 fg=typer.colors.BLUE,
@@ -774,14 +790,14 @@ def update_subitem(
         items = result.get("items", [])
 
         if not items:
-            typer.secho(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
+            secho_err(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         subitem = items[0]
         board = subitem.get("board")
 
         if not board:
-            typer.secho("Error: Could not determine board for subitem", fg=typer.colors.RED)
+            secho_err("Error: Could not determine board for subitem", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         board_id = board["id"]
@@ -791,7 +807,7 @@ def update_subitem(
 
         boards = columns_result.get("boards", [])
         if not boards:
-            typer.secho("Error: Could not fetch board columns", fg=typer.colors.RED)
+            secho_err("Error: Could not fetch board columns", fg=typer.colors.RED)
             raise typer.Exit(1)
 
         board_data = boards[0]
@@ -807,11 +823,11 @@ def update_subitem(
 
         if not target_column:
             available_titles = ", ".join(f"'{col['title']}'" for col in columns)
-            typer.secho(
+            secho_err(
                 f"Error: Column with title '{title}' not found on board {board_id}",
                 fg=typer.colors.RED,
             )
-            typer.secho(f"Available columns: {available_titles}", fg=typer.colors.YELLOW)
+            secho_err(f"Available columns: {available_titles}", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         column_id = target_column["id"]
@@ -824,7 +840,7 @@ def update_subitem(
             # For status columns, find the index for the given label
             settings_str = target_column.get("settings_str")
             if not settings_str:
-                typer.secho(
+                secho_err(
                     f"Error: Status column '{title}' has no status options configured",
                     fg=typer.colors.RED,
                 )
@@ -834,7 +850,7 @@ def update_subitem(
                 settings = json.loads(settings_str)
                 labels = settings.get("labels", {})
             except json.JSONDecodeError:
-                typer.secho("Error: Could not parse column settings", fg=typer.colors.RED)
+                secho_err("Error: Could not parse column settings", fg=typer.colors.RED)
                 raise typer.Exit(1)
 
             # Find the status index for the given label (case-insensitive)
@@ -848,10 +864,10 @@ def update_subitem(
 
             if status_index is None:
                 available_labels = ", ".join(f"'{label}'" for label in labels.values())
-                typer.secho(
+                secho_err(
                     f"Error: Status '{value}' not found in column '{title}'", fg=typer.colors.RED
                 )
-                typer.secho(f"Available statuses: {available_labels}", fg=typer.colors.YELLOW)
+                secho_err(f"Available statuses: {available_labels}", fg=typer.colors.YELLOW)
                 raise typer.Exit(1)
 
             formatted_value = json.dumps({"index": status_index})
@@ -899,29 +915,29 @@ def update_subitem(
         updated_subitem = update_result.get("change_column_value")
 
         if updated_subitem:
-            typer.secho(
+            secho_err(
                 f"✓ Subitem column '{title}' updated to '{value}' successfully!",
                 fg=typer.colors.GREEN,
             )
             print_json(updated_subitem)
         else:
-            typer.secho("Error: Failed to update subitem column", fg=typer.colors.RED)
+            secho_err("Error: Failed to update subitem column", fg=typer.colors.RED)
             raise typer.Exit(1)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
 
 
@@ -946,11 +962,11 @@ def delete_subitem(
     """
     try:
         if subitem_id is None:
-            typer.secho(
+            secho_err(
                 "Error: Subitem ID is required. Use --subitem-id",
                 fg=typer.colors.RED,
             )
-            typer.secho(
+            secho_err(
                 "Example: monday subitems delete --subitem-id 9999999999", fg=typer.colors.BLUE
             )
             raise typer.Exit(1)
@@ -962,7 +978,7 @@ def delete_subitem(
         items = result.get("items", [])
 
         if not items:
-            typer.secho(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
+            secho_err(f"Subitem {subitem_id} not found", fg=typer.colors.YELLOW)
             raise typer.Exit(1)
 
         subitem = items[0]
@@ -972,15 +988,15 @@ def delete_subitem(
 
         # Confirmation prompt (unless --force is used)
         if not force:
-            typer.secho(
+            secho_err(
                 f"WARNING: This will permanently delete subitem '{subitem_name}'"
                 f" (ID: {subitem_id}) from board '{board_name}'!",
                 fg=typer.colors.YELLOW,
             )
-            typer.secho("This action cannot be undone.", fg=typer.colors.RED)
-            confirm_delete = typer.confirm("Are you sure you want to continue?")
+            secho_err("This action cannot be undone.", fg=typer.colors.RED)
+            confirm_delete = typer.confirm("Are you sure you want to continue?", err=True)
             if not confirm_delete:
-                typer.secho("Delete cancelled.", fg=typer.colors.BLUE)
+                secho_err("Delete cancelled.", fg=typer.colors.BLUE)
                 raise typer.Exit(0)
 
         # Execute delete mutation (same as items, since subitems are items in Monday's model)
@@ -989,7 +1005,7 @@ def delete_subitem(
         deleted_subitem = delete_result.get("delete_item")
 
         if deleted_subitem:
-            typer.secho(
+            secho_err(
                 f"✓ Subitem '{subitem_name}' (ID: {subitem_id}) deleted successfully!",
                 fg=typer.colors.GREEN,
             )
@@ -1003,13 +1019,13 @@ def delete_subitem(
         else:
             # Deletion may have succeeded but returned no data
             # Verify by trying to fetch the subitem again
-            typer.secho("Verifying deletion...", fg=typer.colors.YELLOW)
+            secho_err("Verifying deletion...", fg=typer.colors.YELLOW)
             verify_result = client.execute_query(GET_ITEM_BY_ID, {"itemIds": [str(subitem_id)]})
             verify_items = verify_result.get("items", [])
 
             if not verify_items:
                 # Subitem is gone, deletion succeeded
-                typer.secho(
+                secho_err(
                     f"✓ Subitem '{subitem_name}' (ID: {subitem_id}) deleted successfully!",
                     fg=typer.colors.GREEN,
                 )
@@ -1021,21 +1037,21 @@ def delete_subitem(
                 }
                 print_json(output)
             else:
-                typer.secho("Error: Failed to delete subitem", fg=typer.colors.RED)
+                secho_err("Error: Failed to delete subitem", fg=typer.colors.RED)
                 raise typer.Exit(1)
 
     except AuthenticationError:
-        typer.secho(
+        secho_err(
             "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
             fg=typer.colors.RED,
         )
         raise typer.Exit(1)
     except RateLimitError as e:
-        typer.secho(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
         raise typer.Exit(1)
     except MondayAPIError as e:
-        typer.secho(f"API Error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
     except Exception as e:
-        typer.secho(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)

@@ -212,13 +212,23 @@ def test_delete_removes_item_and_list_confirms_removal(
     assert delete_data.get("item_id") == item_id
     assert delete_data.get("deleted") is True
 
-    # With the group now empty, `items list --group-id` exits 0 (not an
-    # error) but prints a "no items found" message with no JSON payload --
-    # read stdout raw rather than parsing it.
-    list_output = run_cli(
-        "items", "list", "--board-id", test_board_id, "--group-id", group_id, raw=True
+    # FR-0008 / US-0008-05: With the group now empty, `items list --group-id`
+    # exits 0 and emits valid JSON with an empty items array — no prose on stdout.
+    list_data, list_stderr = run_cli(
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "--group-id",
+        group_id,
+        capture_stderr=True,
     )
-    assert "No items found" in list_output
+    assert isinstance(list_data, dict)
+    assert list_data.get("items") == []
+    assert list_data.get("items_count") == 0
+    assert list_data.get("group_id_filter") == group_id
+    # The human message must be on stderr, not stdout
+    assert "No items found" in list_stderr
 
     # Idempotent re-delete must not raise -- confirms teardown safety.
     run_cli("items", "delete", "--item-id", item_id, "--force", expect_error=True)

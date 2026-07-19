@@ -73,14 +73,21 @@ markers = [
 # =============================================================================
 # python-semantic-release configuration
 #
-# Tool choice rationale: python-semantic-release (PSR) is Python-native, reads
-# and writes the version directly from/to pyproject.toml, generates CHANGELOG.md
-# in Conventional Commits format, creates annotated git tags, and publishes
-# GitHub Releases — all in one step. This avoids adding a Node.js toolchain and
-# keeps the release automation in a single tool that's already familiar to
-# Python maintainers.
+# FR-0010 — releases are triggered by an explicit `vX.Y.Z` git tag, NOT on merge.
+# Under this flow PSR is used as a CHANGELOG generator (`semantic-release changelog`,
+# run by semantic-release.yml on the tag) and, locally, for a next-version
+# *suggestion* (`semantic-release version --print`). PSR no longer runs its
+# `version` command in CI: the maintainer owns the version (bumps [project].version
+# and pushes the matching tag), and the GitHub Release object is created explicitly
+# against that tag. The keys below stay authoritative for changelog formatting and
+# tag/version mapping and are what make the local suggestion + changelog match CI.
 #
-# Version source of truth: pyproject.toml [project].version only.
+# Note: `upload_to_release`/`build_command`/`remote` only take effect if the PSR
+# `version`/`publish` commands are ever run (e.g. locally); they are inert on the
+# CI tag-triggered path, which uses `changelog` + `gh release create`. Kept for
+# consistency and for anyone running PSR by hand.
+#
+# Version source of truth: pyproject.toml [project].version only (maintainer-owned).
 # src/monday_cli/__init__.py reads the version via importlib.metadata at runtime
 # and in the built binary (PyInstaller --copy-metadata=monday-cli propagates it).
 # =============================================================================

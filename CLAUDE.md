@@ -110,9 +110,12 @@ The guiding principle for the CLI itself: it must be **usable and discoverable b
 
 Status columns carry a `settings_str` JSON blob mapping index → label (e.g. `{"labels": {"0": "Done", "1": "Working on it"}}`). The `items update` / `subitems update` commands look up a column by title (case-insensitive), detect its type from the board schema, and format the value accordingly — status labels are matched case-insensitively and converted to `{"index": N}`; other handled types include text, link, date, numbers, and long-text.
 
-## Release Process (Conventional Commits + Automated CI)
+## Release Process (Explicit git tag — FR-0010)
 
-Releases are **fully automated from CI** — never push tags by hand or edit version/changelog files manually.
+Releases are **decoupled from merging**: a merge to `main` never publishes anything.
+A release happens **only when a maintainer pushes an explicit `vX.Y.Z` git tag**, and
+the maintainer chooses the version via the tag name. Conventional Commits still drive
+CHANGELOG generation and the version *suggestion* (`semantic-release version --print`).
 
 ### Commit Message Convention
 
@@ -132,32 +135,39 @@ Every commit must follow **Conventional Commits**:
 
 A PR CI check (`commit-lint.yml`) **blocks the PR** if commits or the PR title don't conform.
 
-### Automated Release Flow
+### Release Flow (push a `vX.Y.Z` tag)
 
 ```
-merge to main → tests.yml (gate) → semantic-release.yml:
-  - Compute next version from commits since last tag
-  - If no releasable commits → NO-OP (no tag, no release, no changelog change)
-  - If releasable:
-      1. Bump version in pyproject.toml
-      2. Update CHANGELOG.md
-      3. Commit with [skip ci] (prevents infinite loop)
-      4. Push annotated tag v{version}
-      → tag triggers release.yml:
-          1. Build Linux binary (build/build_binary.py)
-          2. Verify binary version == released version
-          3. Upload monday-linux + monday-linux.sha256 to GitHub Release
+# Maintainer, step 1 — land the version on main (does NOT release):
+edit pyproject.toml [project].version = X.Y.Z  → PR → merge
+
+# Maintainer, step 2 — push the matching tag (this releases):
+git tag vX.Y.Z && git push origin vX.Y.Z
+      → semantic-release.yml (trigger: push tag v*.*.*; workflow_dispatch fallback):
+          1. Unit-test gate
+          2. Assert tag == pyproject [project].version (fail fast otherwise)  → binary version == tag
+          3. Regenerate CHANGELOG.md for the tag, commit [skip ci] to main (best-effort)
+          4. Create exactly ONE GitHub Release for the tag (notes from changelog)
+      → release.yml (same tag push):
+          1. Wait for that Release to exist
+          2. Build Linux binary (build/build_binary.py); verify binary version == tag
+          3. Attach monday-linux + monday-linux.sha256 to the Release (no 2nd Release)
 ```
 
-**Out of scope:** PyPI/package-index publishing. Binaries only.
+A merge to `main` is inert — nothing publishes until a tag is pushed. `semantic-release.yml`
+no longer runs `python-semantic-release version`; PSR is retained only as a CHANGELOG
+generator and for the local `semantic-release version --print` suggestion (the maintainer
+owns the version/tag). **Out of scope:** PyPI/package-index publishing. Binaries only.
 
-### Files Managed by the Pipeline (Do Not Edit Manually)
+### Release Ownership (Do Not Edit Manually During a Release)
 
-| File | Managed by |
-|------|------------|
-| `pyproject.toml` `[project].version` | `python-semantic-release` |
-| `CHANGELOG.md` | `python-semantic-release` |
-| Git tags `v*.*.*` | `python-semantic-release` |
+| File / artifact | Owner |
+|-----------------|-------|
+| `pyproject.toml` `[project].version` | **maintainer** (release-prep commit; the tag must match it) |
+| Git tags `v*.*.*` | **maintainer** (pushing the tag triggers the release) |
+| `CHANGELOG.md` | `semantic-release.yml` (regenerated for the tag, best-effort commit) |
+| GitHub Release object | `semantic-release.yml` (one per tag) |
+| Release binary + SHA256 | `release.yml` (attached to the Release) |
 
 ### Required Secret
 
@@ -170,13 +180,13 @@ merge to main → tests.yml (gate) → semantic-release.yml:
 | `tests.yml` | push/PR | Unit tests (gate for release) |
 | `quality.yml` | push/PR | Lint & type-check gate (ruff + black --check + mypy) |
 | `commit-lint.yml` | PR | Enforces Conventional Commits |
-| `semantic-release.yml` | push to main | Version bump + tag + changelog |
-| `release.yml` | tag `v*.*.*` | Build + attach Linux binary |
+| `semantic-release.yml` | tag `v*.*.*` (+ `workflow_dispatch`) | Test-gate + assert tag==version + changelog + create GitHub Release |
+| `release.yml` | tag `v*.*.*` | Build + attach Linux binary to the Release |
 
 ## Reference
 
 - Monday.com API: https://developer.monday.com/api-reference/reference/about-the-api-reference
 - Column types: https://developer.monday.com/api-reference/docs/column-types-reference
-- Version is defined **only** in `pyproject.toml`; `src/monday_cli/__init__.py` reads it via `importlib.metadata` at runtime. `CHANGELOG.md` is auto-generated by `python-semantic-release`. Releases are automated via `.github/workflows/semantic-release.yml` → `.github/workflows/release.yml`.
+- Version is defined **only** in `pyproject.toml`; `src/monday_cli/__init__.py` reads it via `importlib.metadata` at runtime. `CHANGELOG.md` is regenerated by `python-semantic-release`. Releases are triggered by pushing a `vX.Y.Z` git tag (never on merge): `.github/workflows/semantic-release.yml` (Release object + changelog) → `.github/workflows/release.yml` (binary). See "Release Process (Explicit git tag — FR-0010)".
 - Conventional Commits spec: https://www.conventionalcommits.org/
 - python-semantic-release docs: https://python-semantic-release.readthedocs.io/

@@ -10,6 +10,10 @@ There is no standalone update-delete command in this CLI (see
 run-scoped `created_item` / `created_subitem` factory fixtures deleting
 their parent item/subitem at teardown, which removes any updates posted to
 them -- no extra teardown is needed here.
+
+FR-0013: ``test_get_updates_round_trips_posted_body`` uses ``poll_until`` to
+tolerate Monday's eventual-consistency lag between posting an update and the
+update appearing in the ``updates get`` list read.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from collections.abc import Callable
 
 import pytest
 
-from tests.integration.helpers import run_cli
+from tests.integration.helpers import poll_until, run_cli
 
 
 @pytest.mark.integration
@@ -62,7 +66,12 @@ def test_get_updates_round_trips_posted_body(created_item: Callable[..., str], r
     created = run_cli("updates", "create", "--item-id", item_id, "--body", body)
     assert created.get("id")
 
-    data = run_cli("updates", "get", "--item-id", item_id)
+    # FR-0013: updates get can briefly lag after a create on the board's
+    # activity feed, so poll until the new update body appears.
+    data = poll_until(
+        lambda d: isinstance(d, dict) and body in [u.get("body") for u in d.get("updates", [])],
+        ("updates", "get", "--item-id", item_id),
+    )
 
     assert isinstance(data, dict)
     assert str(data.get("id")) == item_id

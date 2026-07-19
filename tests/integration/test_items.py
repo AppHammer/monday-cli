@@ -153,7 +153,17 @@ def test_update_status_round_trips_via_get(created_item: Callable[..., str]) -> 
         matches = [cv for cv in d.get("column_values", []) if cv.get("id") == column_id]
         return len(matches) == 1 and matches[0].get("text") == label
 
-    fetched = poll_until(_has_label, ("items", "get", "--item-id", item_id))
+    fetched = poll_until(
+        _has_label,
+        ("items", "get", "--item-id", item_id),
+        attempts=12,
+        delay=2.0,
+        expect_error=True,
+    )
+    assert isinstance(fetched, dict), (
+        f"items get never returned a parseable JSON dict for item {item_id} "
+        f"after 12 attempts -- item may be rate-limited or unreachable"
+    )
     matches = [cv for cv in fetched["column_values"] if cv.get("id") == column_id]
     assert len(matches) == 1
     assert matches[0].get("text") == label

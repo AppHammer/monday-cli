@@ -8,32 +8,11 @@ even on assertion failure. Skips cleanly when MONDAY_API_TOKEN is unset.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
-from typing import Any
 
 import pytest
 
-from tests.integration.helpers import run_cli
-
-
-def _run_cli_until(
-    predicate: Any, *args: str, attempts: int = 6, delay: float = 1.5, **kwargs: Any
-) -> Any:
-    """Retry a `run_cli` call until `predicate(result)` is true, or give up.
-
-    A group move can briefly lag behind on an `items get` read (eventual
-    consistency), so a read right after a move needs a bounded poll rather
-    than a single shot -- mirrors `_run_cli_until` in test_items.py.
-    """
-    result: Any = None
-    for attempt in range(attempts):
-        result = run_cli(*args, **kwargs)
-        if predicate(result):
-            return result
-        if attempt < attempts - 1:
-            time.sleep(delay)
-    return result
+from tests.integration.helpers import run_cli, run_cli_until
 
 
 @pytest.mark.integration
@@ -51,7 +30,7 @@ def test_move_between_groups_by_id_then_back_by_title(
 
     # Confirm via items get. Bounded poll: the moved group can briefly lag
     # behind on a read right after the move (eventual consistency).
-    confirmed = _run_cli_until(
+    confirmed = run_cli_until(
         lambda d: isinstance(d, dict) and d.get("group", {}).get("id") == group_b,
         "items",
         "get",

@@ -9,33 +9,15 @@ artifacts are torn down by the shared factory fixtures even on failure.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 
 import pytest
 
-from tests.integration.helpers import run_cli
+from tests.integration.helpers import run_cli, run_cli_until_item_present
 
 
 def _status_columns(board_id: str) -> list[dict]:
     return run_cli("statuses", "list", "--board-id", board_id)["status_columns"]
-
-
-def _list_until_present(args: list[str], item_id: str, attempts: int = 6) -> dict:
-    """Run a filtered `items list`, retrying until `item_id` appears.
-
-    A status set via `items update` is strongly consistent on `items get`, but
-    the board `items_page` read can briefly lag, so a freshly-filtered list is
-    polled a few times before asserting to avoid eventual-consistency flakiness.
-    """
-    data: dict = {}
-    for attempt in range(attempts):
-        data = run_cli(*args)
-        if item_id in [str(i["id"]) for i in data["items"]]:
-            return data
-        if attempt < attempts - 1:
-            time.sleep(1.5)
-    return data
 
 
 @pytest.mark.integration
@@ -51,21 +33,19 @@ def test_status_filter_with_explicit_column(
     item_id = created_item("status-item")
     run_cli("items", "update", "--item-id", item_id, "--title", col_title, "--value", label)
 
-    data = _list_until_present(
-        [
-            "items",
-            "list",
-            "--board-id",
-            test_board_id,
-            "--status",
-            label,
-            "--status-column",
-            col_title,
-            "--all",
-            "--limit",
-            "500",
-        ],
+    data = run_cli_until_item_present(
         item_id,
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "--status",
+        label,
+        "--status-column",
+        col_title,
+        "--all",
+        "--limit",
+        "500",
     )
     assert data["status_filter"] == label
     assert data["status_column"] == col_title
@@ -128,7 +108,10 @@ def test_bad_label_lists_chosen_column_labels(test_board_id: str) -> None:
 
 @pytest.mark.integration
 def test_status_and_group_compose_as_and(
-    created_group: Callable[..., str], created_item: Callable[..., str], test_board_id: str
+    created_group: Callable[..., str],
+    created_item: Callable[..., str],
+    test_board_id: str,
+    run_id: str,
 ) -> None:
     column = _status_columns(test_board_id)[0]
     col_title = column["column_title"]
@@ -146,25 +129,30 @@ def test_status_and_group_compose_as_and(
         for g in run_cli("groups", "list", "--board-id", test_board_id)["groups"]
         if g["id"] == group_in
     )
-    data = _list_until_present(
-        [
-            "items",
-            "list",
-            "--board-id",
-            test_board_id,
-            "--status",
-            label,
-            "--status-column",
-            col_title,
-            "--group",
-            title_in,
-            "--all",
-            "--limit",
-            "500",
-        ],
+    data = run_cli_until_item_present(
         item_in,
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "--status",
+        label,
+        "--status-column",
+        col_title,
+        "--group",
+        title_in,
+        "--all",
+        "--limit",
+        "500",
     )
-    ids = [str(i["id"]) for i in data["items"]]
+    # AC-3/AC-4: scope BOTH the presence and the absence assertion to THIS
+    # run's own artifacts (name-prefixed with run_id). A leaked or concurrent
+    # foreign item that happens to share this status+group filter can then
+    # neither satisfy `item_in in ids` falsely nor break `item_out not in ids`
+    # -- the previously-flaky contention failure (`assert item_in in []`) is
+    # eliminated because we assert against this run's slice, not the whole
+    # shared board.
+    ids = [str(i["id"]) for i in data["items"] if str(i.get("name", "")).startswith(run_id)]
     assert item_in in ids  # matches status AND group
     assert item_out not in ids  # same status, different group -> excluded
     assert data["group_filter"] == title_in

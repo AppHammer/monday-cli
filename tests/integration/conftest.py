@@ -29,12 +29,13 @@ import os
 import secrets
 import time
 import warnings
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
-from tests.integration.helpers import run_cli
+from tests.integration.helpers import run_cli, run_cli_until
 
 PM_BOARD_ID = "18422673287"
 DEFAULT_TEST_BOARD_ID = "18422673411"
@@ -112,6 +113,7 @@ def _swallow_not_found(
     *args: str,
     max_attempts: int = _TEARDOWN_MAX_ATTEMPTS,
     backoff_seconds: float = _TEARDOWN_BACKOFF_SECONDS,
+    confirm_absent: Callable[[], bool] | None = None,
 ) -> None:
     """Run a delete command, tolerating an artifact that's already gone --
     but never silently swallowing a REAL teardown failure.
@@ -131,9 +133,20 @@ def _swallow_not_found(
     raise, or it would abort every other fixture's teardown in the same
     test's stack) so a real leak shows up in the test run instead of
     vanishing.
+
+    FR-0013 #70 (AC-2): the delete RESPONSE alone is not always trustworthy --
+    `groups delete` reports `deleted: false` even on a genuine removal on this
+    account (see test_groups.py), so a JSON response can't prove absence. When
+    a ``confirm_absent`` callable is supplied, it is invoked after a
+    successful-looking delete to verify the artifact is actually gone (a
+    bounded list poll, tolerant of eventual consistency); if it still can't
+    confirm absence -- or itself errors -- a warning is surfaced rather than
+    trusting the delete blindly. Resources with a trustworthy `deleted: true`
+    signal (items/subitems) omit it and keep a single delete call.
     """
     last_output: Any = None
     last_exc: BaseException | None = None
+    deleted = False
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -147,20 +160,199 @@ def _swallow_not_found(
             if isinstance(last_output, str) and "not found" in last_output.lower():
                 return  # Genuinely already gone -- expected, idempotent teardown.
             if not isinstance(last_output, str):
-                return  # `run_cli` returned parsed JSON -- the delete succeeded (exit 0).
+                deleted = True  # `run_cli` returned parsed JSON -- delete exited 0.
+                break
 
         if attempt < max_attempts:
             time.sleep(backoff_seconds * attempt)
 
-    detail = repr(last_exc) if last_exc is not None else last_output
+    if not deleted:
+        detail = repr(last_exc) if last_exc is not None else last_output
+        warnings.warn(
+            "Integration teardown could not confirm deletion after "
+            f"{max_attempts} attempts: monday {' '.join(args)}\n"
+            f"Last output: {detail}\n"
+            "This artifact may still exist on the shared TEST board and require "
+            "manual cleanup.",
+            stacklevel=2,
+        )
+        return
+
+    # Delete reported success -- optionally verify the artifact is really gone.
+    if confirm_absent is None:
+        return
+    try:
+        confirmed = confirm_absent()
+    except Exception as exc:  # defensive: confirmation must not abort teardown
+        confirmed = False
+        warnings.warn(
+            f"Integration teardown could not verify deletion (confirmation errored) for: "
+            f"monday {' '.join(args)}\nError: {exc!r}",
+            stacklevel=2,
+        )
+        return
+    if not confirmed:
+        warnings.warn(
+            "Integration teardown deleted an artifact but could not confirm its "
+            f"absence via a follow-up list: monday {' '.join(args)}\n"
+            "This artifact may still exist on the shared TEST board and require "
+            "manual cleanup.",
+            stacklevel=2,
+        )
+
+
+# --- Run-scoped isolation + backstop sweep (FR-0013 #70) ---------------------
+#
+# The suite runs on a SHARED test board that overlapping CI runs mutate
+# concurrently. Two mechanisms keep it deterministic and leak-free:
+#   1. Per-run namespacing: every artifact is named `<run_id>-...` (see
+#      `run_id`), so a run's absence-assertions can be scoped to its own slice
+#      and a foreign/leaked artifact can never satisfy or break them.
+#   2. A session-scoped backstop sweep (`_backstop_sweep`) that removes STALE
+#      `it-*` items left behind by a previously-crashed run -- age-guarded via
+#      each item's `created_at` so it can NEVER delete a concurrently-running
+#      run's fresh artifacts. Groups carry no `created_at` in Monday's API and
+#      so cannot be age-guarded; they are cleaned at source by the failure-safe
+#      factory teardown (with `confirm_absent` above) rather than swept.
+
+SWEEP_NAME_PREFIX = "it-"
+_DEFAULT_SWEEP_MAX_AGE_SECONDS = 3600.0
+
+
+def _sweep_max_age_seconds(env: Mapping[str, str]) -> float:
+    """How old (seconds) an `it-*` item must be before the backstop sweeps it.
+
+    Env-tunable via ``MONDAY_IT_SWEEP_MAX_AGE_SECONDS``. The default (1h) is
+    comfortably longer than any single integration run, which is what makes the
+    age guard safe under concurrency: a live run's artifacts are always younger
+    than the threshold and therefore never selected.
+    """
+    raw = env.get("MONDAY_IT_SWEEP_MAX_AGE_SECONDS")
+    if raw is None:
+        return _DEFAULT_SWEEP_MAX_AGE_SECONDS
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_SWEEP_MAX_AGE_SECONDS
+    return value if value > 0 else _DEFAULT_SWEEP_MAX_AGE_SECONDS
+
+
+def _parse_created_at(value: Any) -> datetime | None:
+    """Parse a Monday `created_at` ISO-8601 string to an aware UTC datetime.
+
+    Returns None for anything unparseable/absent -- the caller treats that as
+    "cannot age-guard", i.e. leaves the item alone (never sweeps it).
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _select_stale_item_ids(
+    items: Sequence[Mapping[str, Any]],
+    *,
+    now: datetime,
+    max_age_seconds: float,
+    prefix: str = SWEEP_NAME_PREFIX,
+) -> list[str]:
+    """Pure selection for the backstop sweep (unit-tested, no API).
+
+    Returns the ids of items that BOTH (a) carry the integration naming
+    ``prefix`` and (b) are at least ``max_age_seconds`` old per their
+    ``created_at``. Items whose ``created_at`` can't be parsed are treated as
+    too-young and NOT selected -- deleting a concurrent live run's artifact is
+    far worse than leaving an old leak for the next session's sweep.
+    """
+    stale: list[str] = []
+    for item in items:
+        name = str(item.get("name", ""))
+        if not name.startswith(prefix):
+            continue
+        created = _parse_created_at(item.get("created_at"))
+        if created is None:
+            continue
+        if (now - created).total_seconds() >= max_age_seconds:
+            item_id = item.get("id")
+            if item_id is not None:
+                stale.append(str(item_id))
+    return stale
+
+
+def _group_absent(board_id: str, title: str) -> bool:
+    """Bounded-poll confirmation that a group `title` no longer exists.
+
+    Reuses the FR-0013 #69 poll helper so a delete that is genuinely done but
+    briefly lags on the `groups list` read still confirms rather than warning
+    spuriously. Returns True once the title is gone; False if it is still
+    present after the bounded poll.
+    """
+    data = run_cli_until(
+        lambda d: isinstance(d, dict)
+        and title not in {g.get("title") for g in d.get("groups", [])},
+        "groups",
+        "list",
+        "--board-id",
+        board_id,
+    )
+    if not isinstance(data, dict):
+        return False
+    return title not in {g.get("title") for g in data.get("groups", [])}
+
+
+def _run_backstop_sweep(board_id: str, phase: str) -> None:
+    """List the test board and delete stale `it-*` items (age-guarded).
+
+    Best-effort and defensive: any failure is warned, never raised, so a sweep
+    problem can't abort the session. Only ever touches the resolved test board
+    (never the PM board -- `test_board_id` hard-fails on it) and only `it-*`
+    prefixed items, so foreign board content is never at risk.
+    """
+    if not os.environ.get("MONDAY_API_TOKEN"):
+        return
+    try:
+        data = run_cli("items", "list", "--board-id", board_id, "--all", "--limit", "500")
+    except Exception as exc:  # defensive: a sweep must not break the session
+        warnings.warn(f"Backstop sweep ({phase}) could not list the board: {exc!r}", stacklevel=2)
+        return
+    items = data.get("items", []) if isinstance(data, dict) else []
+    stale = _select_stale_item_ids(
+        items,
+        now=datetime.now(UTC),
+        max_age_seconds=_sweep_max_age_seconds(os.environ),
+    )
+    if not stale:
+        return
     warnings.warn(
-        "Integration teardown could not confirm deletion after "
-        f"{max_attempts} attempts: monday {' '.join(args)}\n"
-        f"Last output: {detail}\n"
-        "This artifact may still exist on the shared TEST board and require "
-        "manual cleanup.",
+        f"Backstop sweep ({phase}) removing {len(stale)} stale it-* item(s) left by a "
+        f"prior crashed run: {', '.join(stale)}",
         stacklevel=2,
     )
+    for item_id in stale:
+        _swallow_not_found("items", "delete", "--item-id", item_id, "--force")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _backstop_sweep(test_board_id: str) -> Iterator[None]:
+    """Sweep stale `it-*` leaks at session start AND end (age-guarded).
+
+    Autouse + session-scoped: runs once around the whole integration session.
+    Skips cleanly when no token is configured. The start sweep clears leaks
+    from earlier crashed runs before this session begins; the end sweep is the
+    final backstop. Neither can touch a concurrently-running run's artifacts,
+    which are always younger than the age threshold.
+    """
+    _run_backstop_sweep(test_board_id, "session start")
+    yield
+    _run_backstop_sweep(test_board_id, "session end")
 
 
 @pytest.fixture
@@ -196,7 +388,14 @@ def created_group(test_board_id: str, run_id: str) -> Iterator[Callable[..., str
 
     for group_id, title in records:
         _swallow_not_found(
-            "groups", "delete", "--title", title, "--board-id", test_board_id, "--confirm"
+            "groups",
+            "delete",
+            "--title",
+            title,
+            "--board-id",
+            test_board_id,
+            "--confirm",
+            confirm_absent=lambda t=title: _group_absent(test_board_id, t),
         )
 
 

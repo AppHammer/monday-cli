@@ -141,3 +141,76 @@ def test_teardown_never_raises_even_on_unexpected_exception(
         )
 
     assert calls[0] == 2
+
+
+# --- FR-0013 #70: post-delete absence confirmation ---------------------------
+
+
+def test_confirm_absent_true_accepts_delete_without_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A successful delete whose confirmation says "gone" must not warn."""
+    _patch_run_cli(monkeypatch, {"group_id": "g1", "deleted": False})
+    confirm_calls = [0]
+
+    def _confirm() -> bool:
+        confirm_calls[0] += 1
+        return True
+
+    with _assert_no_warnings():
+        integration_conftest._swallow_not_found(
+            "groups", "delete", "--title", "x", "--confirm", confirm_absent=_confirm
+        )
+
+    assert confirm_calls[0] == 1  # confirmation actually ran
+
+
+def test_confirm_absent_false_warns_that_artifact_may_remain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`groups delete` reports deleted:false even on success, so a JSON response
+    alone can't prove absence; if the follow-up confirmation still sees the
+    artifact, teardown must surface a leak warning (never trust blindly)."""
+    _patch_run_cli(monkeypatch, {"group_id": "g1", "deleted": False})
+
+    with pytest.warns(UserWarning, match="could not confirm its absence"):
+        integration_conftest._swallow_not_found(
+            "groups", "delete", "--title", "x", "--confirm", confirm_absent=lambda: False
+        )
+
+
+def test_confirm_absent_error_warns_and_does_not_raise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A confirmation that itself errors must degrade to a warning, not abort
+    the surrounding teardown."""
+    _patch_run_cli(monkeypatch, {"group_id": "g1", "deleted": False})
+
+    def _boom() -> bool:
+        raise RuntimeError("list failed")
+
+    with pytest.warns(UserWarning, match="could not verify deletion"):
+        integration_conftest._swallow_not_found(
+            "groups", "delete", "--title", "x", "--confirm", confirm_absent=_boom
+        )
+
+
+def test_confirm_absent_skipped_when_artifact_already_gone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the delete path shows "not found" (already gone), the confirmation
+    is irrelevant and must NOT run -- it would spend an extra API call for
+    nothing."""
+    _patch_run_cli(monkeypatch, "Group x not found")
+    confirm_calls = [0]
+
+    def _confirm() -> bool:
+        confirm_calls[0] += 1
+        return True
+
+    with _assert_no_warnings():
+        integration_conftest._swallow_not_found(
+            "groups", "delete", "--title", "x", "--confirm", confirm_absent=_confirm
+        )
+
+    assert confirm_calls[0] == 0

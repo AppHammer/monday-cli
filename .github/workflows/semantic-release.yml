@@ -1,81 +1,87 @@
 name: Semantic Release
 
-# Trigger: only on push to main (i.e., after a PR is merged).
-# This is where automated versioning, changelog, tag, and GitHub Release happen.
+# Trigger: an explicit `vX.Y.Z` git-tag push (FR-0010).
 #
-# Design decisions / hazard mitigations documented here:
+# RELEASE GOVERNANCE — releases are decoupled from merge-to-main:
 #
-# 1. GATE ON GREEN TESTS
-#    The release job requires the "test" job to pass first. The test job re-runs
-#    the unit test suite so we never publish a red build. Once FR-0002 integration
-#    tests land on main, add integration.yml as an additional gate at the
-#    branch-protection level (no workflow change required for that).
+#   * A merge to `main` NEVER releases. There is no `push: main` trigger, so a
+#     PR merge fires nothing here — no version bump, no CHANGELOG change, no tag,
+#     no GitHub Release, no binary build. (FR-0010 AC-1)
 #
-# 2. BOT-PUSH LOOP PREVENTION (two independent guards)
-#    a. paths-ignore on pyproject.toml + CHANGELOG.md prevents this workflow
-#       from firing on the bump commit that PSR pushes.
-#    b. PSR adds "[skip ci]" to its bump commit message as a second guard in
-#       case paths-ignore is bypassed.
+#   * A release is cut ONLY when a maintainer pushes a `vX.Y.Z` tag. The tag name
+#     is the single source of truth for the version — the maintainer chooses it.
+#     (FR-0010 AC-2, AC-5)
 #
-# 3. TOKEN REQUIREMENTS
-#    GH_TOKEN must be a Personal Access Token (classic) or a GitHub App token
-#    with Contents: write + pull-requests: read on this repo.
-#    The default GITHUB_TOKEN cannot push to a branch-protected main.
-#    See README.md section "Release Bot Token Setup" for configuration steps.
+# WHO OWNS WHAT (the FR-0010 ownership boundary):
+#   * Maintainer owns the version. Before tagging, they land a release-prep commit
+#     on `main` that sets `[project].version` in pyproject.toml to the target
+#     version, then push `v<that-version>`. This job hard-asserts the two match so
+#     a mismatched tag fails fast with a teaching error (guarantees AC-5: the
+#     built binary's version == the tag).
+#   * THIS job owns publishing: it (re)generates CHANGELOG.md for the tag and
+#     creates the ONE GitHub Release object for the tag, gated on green tests.
+#   * release.yml (triggered by the same tag) owns the binary: it waits for this
+#     Release to exist, then attaches monday-linux + SHA256 to it. It never
+#     creates a second Release — preserving the single-release guarantee (AC-3).
 #
-# 4. NO-OP BEHAVIOR
-#    When there are no releasable commits (feat:/fix:/perf:/BREAKING CHANGE:)
-#    since the last tag, PSR writes "released=false" to GITHUB_OUTPUT and exits
-#    0 with no file/tag/release changes. The workflow reports this cleanly.
+# WHY NOT python-semantic-release `version` ON THE TAG (the design tradeoff):
+#   PSR's `version` command computes the version from Conventional Commits and, as
+#   one atomic step, bumps pyproject.toml, writes CHANGELOG.md, commits, CREATES
+#   the tag, and creates the GitHub Release. That model is fundamentally coupled to
+#   PSR *creating* the tag. Here the maintainer has already pushed the tag, so
+#   running `version` would either try to re-create an existing tag (error) or
+#   compute a version that need not equal the maintainer's chosen tag. So PSR is
+#   intentionally demoted from version-owner to a CHANGELOG generator, and the
+#   Release object is created explicitly with `gh release create` against the
+#   maintainer's tag. PSR's config in pyproject.toml ([tool.semantic_release]) is
+#   retained and stays authoritative for tag_format + changelog formatting and for
+#   local `semantic-release version --print` assistance.
 #
-# 5. CONCURRENCY — cancel-in-progress: FALSE
-#    PSR's release sequence (version bump → commit → tag → GitHub Release) is
-#    NOT atomic. Cancelling a mid-flight run could leave a bumped pyproject.toml
-#    without a tag, or a tag without a GitHub Release. We use
-#    cancel-in-progress: false (default) so each run completes before the next
-#    one starts. Rapid pushes to main queue up sequentially; the second run will
-#    usually no-op (PSR computes no new version from the already-released commit).
+# NO SELF-RETRIGGER LOOP (AC-6): the only trigger is a `vX.Y.Z` tag push. The
+#   best-effort CHANGELOG commit this job pushes to `main` is a branch push, which
+#   cannot match a tag trigger — so it can never retrigger this workflow. The
+#   `[skip ci]` marker is kept as belt-and-suspenders.
 #
-# 6. SINGLE-RELEASE GUARANTEE
-#    PSR creates the GitHub Release object (upload_to_release = true in
-#    pyproject.toml). release.yml (triggered by the tag push) only attaches the
-#    Linux binary asset to that existing Release using append_body + asset upload.
-#    This guarantees exactly one Release per version.
+# TOKEN: GH_TOKEN must be a PAT (classic) or GitHub App token with Contents: write
+#   (needed to push the CHANGELOG commit to a branch-protected main and to create
+#   the Release). See README.md "Release Bot Token Setup".
 #
-# 7. PSR STEP OUTPUTS
-#    We use the official python-semantic-release/python-semantic-release GitHub
-#    Action (not the bare CLI) so that step outputs (released, version, tag) are
-#    correctly written to GITHUB_OUTPUT and are available to downstream steps.
-#    The action wraps the CLI and handles output wiring automatically.
+# A workflow_dispatch fallback is provided for manual/emergency publishing; it must
+# be dispatched against a `vX.Y.Z` tag ref (Run workflow → pick the tag), so the
+# tag-as-source-of-truth invariant holds for both triggers.
+#
+# KNOWN LIMITATION — dispatch does not attach the binary: `release.yml` only has a
+#   `push: tags:` trigger, so a `workflow_dispatch` run of THIS workflow (this
+#   workflow only) never fires `release.yml`, even though it creates/updates the
+#   GitHub Release. Use `workflow_dispatch` only as a changelog/Release-object
+#   fallback (e.g. re-running the Release creation for an existing tag); to get the
+#   binary attached, push the `vX.Y.Z` tag so both workflows trigger together. If
+#   you dispatch this workflow and need the binary, separately re-run/dispatch
+#   `release.yml` for the same tag once the Release exists.
 
 on:
   push:
-    branches:
-      - main
-    # Guard against infinite loop: ignore paths that PSR's bump commit touches.
-    # PSR also adds "[skip ci]" to its commit message as a second guard.
-    paths-ignore:
-      - 'pyproject.toml'
-      - 'CHANGELOG.md'
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch: {}
 
 concurrency:
+  # Resolves to refs/tags/vX.Y.Z. Serialise per-tag; do not cancel a mid-flight
+  # publish (Release creation + CHANGELOG push are not atomic).
   group: semantic-release-${{ github.ref }}
-  # IMPORTANT: must be false. PSR's version+commit+tag+release sequence is not
-  # atomic — cancelling mid-run can leave the repo in an inconsistent state.
   cancel-in-progress: false
 
 permissions:
-  contents: write  # needed to push commits, tags, and create GitHub Releases
+  contents: write  # push the CHANGELOG commit and create the GitHub Release
 
 jobs:
-  # ── Step 1: Run tests before releasing ────────────────────────────────────
+  # ── Step 1: Release test-gate — never publish a red build ──────────────────
   test:
     name: Gate — Run Tests
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        # fetch-depth: 1 (default) is sufficient — the test job only runs pytest
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -90,27 +96,36 @@ jobs:
       - name: Run unit tests
         run: pytest tests/unit
 
-  # ── Step 2: Compute version, bump pyproject.toml, update CHANGELOG, tag ──
+  # ── Step 2: Publish the release for the pushed tag ─────────────────────────
   release:
-    name: Semantic Release
+    name: Publish Release for Tag
     needs: test
     runs-on: ubuntu-latest
 
     outputs:
-      released: ${{ steps.semrel.outputs.released }}
-      version: ${{ steps.semrel.outputs.version }}
-      tag: ${{ steps.semrel.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
 
     steps:
-      - name: Check out repository
+      - name: Guard — trigger must be a version tag
+        run: |
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "ERROR: this workflow must be triggered by (or dispatched against) a vX.Y.Z tag."
+            echo "You triggered it against '${{ github.ref_name }}' (ref_type=${{ github.ref_type }})."
+            echo "Next step: push a tag, e.g. 'git tag v0.7.1 && git push origin v0.7.1',"
+            echo "or use Run workflow and select a vX.Y.Z tag as the ref."
+            exit 1
+          fi
+
+      - name: Check out the tagged commit
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history required for PSR version computation
-          # Use GH_TOKEN so the push to protected main is authorised.
-          # The default GITHUB_TOKEN cannot push past branch protection.
+          fetch-depth: 0  # full history so PSR can build the changelog
+          # GH_TOKEN (PAT/App) is required to push the CHANGELOG commit to the
+          # branch-protected main branch; the default GITHUB_TOKEN cannot.
           token: ${{ secrets.GH_TOKEN }}
 
-      - name: Configure git identity for PSR commits
+      - name: Configure git identity
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -120,26 +135,171 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Run python-semantic-release
-        id: semrel
-        # Use the official GitHub Action (not the bare CLI) so that step outputs
-        # (released, version, tag) are correctly written to GITHUB_OUTPUT.
-        # The action wraps the PSR CLI and handles output wiring automatically.
-        uses: python-semantic-release/python-semantic-release@v9
-        with:
-          # PSR will:
-          #  1. Compute the next version from Conventional Commits since last tag
-          #  2. If releasable: bump pyproject.toml, update CHANGELOG.md, commit
-          #     with "[skip ci]", push annotated tag v{version} to main, create
-          #     GitHub Release with auto-generated notes from Conventional Commits
-          #  3. If not releasable: write released=false to outputs and exit 0
-          github_token: ${{ secrets.GH_TOKEN }}
-          # git_committer_name and git_committer_email are set via git config above
-
-      - name: Report release outcome
+      - name: Install package with dev dependencies
         run: |
-          if [ "${{ steps.semrel.outputs.released }}" = "true" ]; then
-            echo "✓ Released version ${{ steps.semrel.outputs.version }} (tag ${{ steps.semrel.outputs.tag }})"
-          else
-            echo "No releasable commits found — no release was made (no-op)."
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Resolve version from tag and assert it matches pyproject
+        id: resolve
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # AC-5: the built binary reads its version from pyproject.toml, so the
+          # tagged commit MUST already carry the tag's version. Fail fast with a
+          # teaching error if not, rather than shipping a mislabelled binary.
+          PYPROJECT_VERSION=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "Tag version:       $VERSION"
+          echo "pyproject version: $PYPROJECT_VERSION"
+
+          # Compare via PEP 440 normalization, not a raw string, so prerelease tags
+          # match their pyproject counterpart: "0.7.1-rc.1" (git-tag-friendly) and
+          # "0.7.1rc1" (pyproject/PEP-440-canonical) are the same version.
+          VERSIONS_MATCH=$(python -c "
+          import sys
+          from packaging.version import Version, InvalidVersion
+          try:
+              print(str(Version(sys.argv[1]) == Version(sys.argv[2])).lower())
+          except InvalidVersion as exc:
+              print(f\"error: {exc}\", file=sys.stderr)
+              print(\"false\")
+          " "$VERSION" "$PYPROJECT_VERSION")
+
+          if [ "$VERSIONS_MATCH" != "true" ]; then
+            echo "ERROR: tag '$TAG' does not match pyproject [project].version '$PYPROJECT_VERSION'."
+            echo "The maintainer owns the version: bump pyproject.toml to $VERSION, land it on"
+            echo "main, THEN push tag v$PYPROJECT_VERSION (or re-tag at the bumped commit)."
+            exit 1
           fi
+
+      - name: Check out `main` at the tagged commit
+        run: |
+          # actions/checkout leaves us in detached HEAD at the tag. PSR's
+          # branches.main = "main" config (pyproject.toml [tool.semantic_release])
+          # decides whether the current ref is "the release branch" by asking git
+          # for the current branch name, which is empty on a detached HEAD — so
+          # `semantic-release changelog` silently falls into its non-release-branch
+          # no-op path and never touches CHANGELOG.md. Move to a local `main`
+          # branch pointed at this exact commit (no push, no rewrite of anything)
+          # so PSR recognizes it. The later "Commit refreshed CHANGELOG.md to main"
+          # step still fetches origin/main and compares by commit SHA before ever
+          # pushing, so this local branch rename cannot cause it to push somewhere
+          # unintended.
+          git checkout -B main
+
+      - name: Regenerate CHANGELOG.md for the tag (best-effort)
+        id: changelog
+        run: |
+          # PSR regenerates CHANGELOG.md from the tag/commit history (the pushed
+          # tag is already in history). Best-effort: a PSR quirk must never block
+          # the release — the maintainer's committed CHANGELOG.md is the fallback.
+          # Requires the previous step's checkout of local `main` so PSR treats
+          # this as the release branch; otherwise it no-ops without erroring.
+          if semantic-release changelog; then
+            if git diff --quiet -- CHANGELOG.md; then
+              echo "::warning::'semantic-release changelog' ran successfully but CHANGELOG.md did not change. If releasable commits landed since the last release, this likely means PSR did not recognize the release branch — investigate rather than assuming a genuine no-op."
+            else
+              echo "CHANGELOG.md regenerated by python-semantic-release."
+            fi
+          else
+            echo "::warning::'semantic-release changelog' failed; using the committed CHANGELOG.md as-is."
+          fi
+
+      - name: Commit refreshed CHANGELOG.md to main (best-effort)
+        run: |
+          VERSION="${{ steps.resolve.outputs.version }}"
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "CHANGELOG.md unchanged — nothing to commit."
+            exit 0
+          fi
+          # Only fast-forward main if the tagged commit is main's current tip;
+          # otherwise skip (never rewrite/force). The Release does not depend on
+          # this commit succeeding.
+          git fetch origin main
+          if [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ]; then
+            git add CHANGELOG.md
+            git commit -m "chore(release): update CHANGELOG for v${VERSION} [skip ci]"
+            if git push origin "HEAD:main"; then
+              echo "Pushed CHANGELOG update to main."
+            else
+              echo "::warning::Could not push CHANGELOG update to main (non-blocking)."
+            fi
+          else
+            echo "::notice::Tagged commit is not main's tip — skipping CHANGELOG commit to main (non-blocking)."
+          fi
+
+      - name: Extract release notes for this version
+        id: notes
+        run: |
+          VERSION="${{ steps.resolve.outputs.version }}"
+          # Pull the section for this version out of CHANGELOG.md so the GitHub
+          # Release notes match the changelog. Matches a header line containing
+          # the version (e.g. "## v0.7.1 - ..." or "## 0.7.1 (...)").
+          python - "$VERSION" <<'PY' > release_notes.md || true
+          import re, sys, pathlib
+          version = sys.argv[1]
+          text = pathlib.Path("CHANGELOG.md").read_text() if pathlib.Path("CHANGELOG.md").exists() else ""
+          lines = text.splitlines()
+          start = None
+          # Anchor to an exact version boundary (not neighboring digits/dots) so
+          # "0.7.1" cannot match a header for "0.7.10".
+          version_re = re.compile(r"(?<![0-9.])" + re.escape(version) + r"(?![0-9.])")
+          for i, line in enumerate(lines):
+              if line.startswith("## ") and version_re.search(line):
+                  start = i
+                  break
+          if start is not None:
+              end = len(lines)
+              for j in range(start + 1, len(lines)):
+                  if lines[j].startswith("## "):
+                      end = j
+                      break
+              section = "\n".join(lines[start + 1:end]).strip()
+              sys.stdout.write(section)
+          PY
+          if [ -s release_notes.md ]; then
+            echo "have_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create the GitHub Release (single-release owner)
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          TAG="${{ steps.resolve.outputs.tag }}"
+          VERSION="${{ steps.resolve.outputs.version }}"
+
+          # Single-release guarantee: this is the ONLY step that CREATES the
+          # Release. If it already exists (e.g. a re-run), do not create a second.
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Release for $TAG already exists — leaving it in place (no double-release)."
+            exit 0
+          fi
+
+          PRERELEASE_FLAG=""
+          case "$TAG" in
+            *-*) PRERELEASE_FLAG="--prerelease" ;;
+          esac
+
+          if [ "${{ steps.notes.outputs.have_notes }}" = "true" ]; then
+            # shellcheck disable=SC2086
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --title "Monday CLI v${VERSION}" \
+              --notes-file release_notes.md \
+              --verify-tag \
+              $PRERELEASE_FLAG
+          else
+            # shellcheck disable=SC2086
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --title "Monday CLI v${VERSION}" \
+              --generate-notes \
+              --verify-tag \
+              $PRERELEASE_FLAG
+          fi
+          echo "Created GitHub Release $TAG. release.yml will attach the binary + SHA256."

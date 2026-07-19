@@ -798,7 +798,7 @@ maintainer decision; the workflow itself does not change branch protection.
 
 ## Release Process (Conventional Commits)
 
-monday-cli uses **Conventional Commits** as the source of truth for all versioning and changelog generation. Every commit to `main` (via PR) must conform to the spec, and the release pipeline derives the next version automatically from commit types.
+monday-cli uses **Conventional Commits** as the source of truth for changelog generation and for suggesting the next version. Every commit to `main` (via PR) must conform to the spec. **Releases are decoupled from merging** (FR-0010): a merge to `main` never publishes anything — a release happens **only when a maintainer pushes an explicit `vX.Y.Z` git tag**, and the maintainer chooses the version via the tag name.
 
 ### Commit Message Format
 
@@ -821,43 +821,79 @@ monday-cli uses **Conventional Commits** as the source of truth for all versioni
 
 A commit-lint check runs on every PR and **fails the PR** if any commit message (or PR title, which becomes the squash-commit subject) does not conform.
 
-### Automated Release Flow
+### Release Flow — push a `vX.Y.Z` tag to release
 
-On merge to `main`, the following happens automatically:
+Merging a PR to `main` does **not** cut a release — no version bump, no CHANGELOG
+change, no tag, no GitHub Release, no binary build. To publish a release, a
+maintainer performs two explicit steps:
 
-1. `tests.yml` runs the unit test suite (and future integration tests when FR-0002 lands).
-2. `semantic-release.yml` runs `python-semantic-release version`, which:
-   - Computes the next version from commits since the last tag (`feat` → minor, `fix`/`perf` → patch, breaking → major).
-   - **No-op path**: if there are no releasable commits (`feat`/`fix`/`perf`/breaking), the pipeline exits cleanly with no tag and no Release.
-   - Updates `version` in `pyproject.toml` (the single source of version truth).
-   - Prepends a new entry to `CHANGELOG.md`.
-   - Commits both files (the commit message includes `[skip ci]` to prevent an infinite loop).
-   - Creates an annotated git tag `v{version}` and pushes it to `main`.
-3. The tag push triggers `release.yml`, which:
-   - Builds the standalone Linux binary via `build/build_binary.py` (PyInstaller).
-   - Verifies `dist/monday version` reports the released version.
-   - Creates a SHA256 checksum.
-   - Uploads `monday-linux` + `monday-linux.sha256` to the GitHub Release.
+**1. Land a release-prep commit on `main`.**
+   - Set `[project].version` in `pyproject.toml` to the target version (this is
+     the version — you choose it). Follow Conventional-Commit convention when
+     deciding the number: `feat` → minor, `fix`/`perf` → patch, breaking → major.
+     You can preview PSR's suggestion locally with
+     `semantic-release version --print` (it does not change anything).
+   - Merge it via a normal PR. Because there is no release-on-merge trigger, this
+     merge publishes nothing.
 
-**Out of scope:** PyPI / package-index publishing. Releases are distributed as binary assets only.
+**2. Push the matching tag.**
+   ```bash
+   git checkout main && git pull
+   git tag v0.7.1        # must equal the pyproject version you just landed
+   git push origin v0.7.1
+   ```
+
+The tag push (and only the tag push) drives the release:
+
+1. `semantic-release.yml` (trigger: `push: tags: v*.*.*`, plus a `workflow_dispatch`
+   fallback that must be run against a `vX.Y.Z` tag ref):
+   - Runs the unit-test gate — a red build never publishes.
+   - **Asserts the tag equals `pyproject.toml` `[project].version`** and fails with a
+     teaching error if they differ (guarantees the built binary's version == the tag).
+   - Regenerates `CHANGELOG.md` for the tag and commits it back to `main` with
+     `[skip ci]` (best-effort; the release does not depend on this commit).
+   - Creates **exactly one** GitHub Release for the tag, with notes from the changelog.
+2. `release.yml` (same tag push) waits for that Release, builds the standalone Linux
+   binary via `build/build_binary.py` (PyInstaller), verifies `dist/monday version`
+   reports the tag's version, creates a SHA256 checksum, and **attaches**
+   `monday-linux` + `monday-linux.sha256` to the existing Release. It never creates a
+   second Release — one Release per version.
+
+**No-op safety:** a merge to `main` is inert by design; nothing is published until you
+push a tag. **Out of scope:** PyPI / package-index publishing. Releases are distributed
+as binary assets only.
+
+**`workflow_dispatch` limitation:** dispatching `semantic-release.yml` manually creates
+or updates the GitHub Release, but it does **not** attach the binary — `release.yml`
+only triggers on a `push: tags:` event, so a dispatch run of `semantic-release.yml`
+never fires it. Treat `workflow_dispatch` as a changelog/Release-object fallback only
+(e.g. re-creating the Release for a tag that already exists). To get a binary attached,
+push the `vX.Y.Z` tag so both workflows fire together; if you already dispatched
+`semantic-release.yml` and need the binary, separately dispatch `release.yml` for the
+same tag.
 
 ### Release Bot Token Setup
 
-The semantic-release workflow needs to push to a branch-protected `main`, which the default `GITHUB_TOKEN` cannot do. Set up a dedicated token:
+`semantic-release.yml` needs to push the best-effort CHANGELOG commit to a
+branch-protected `main` and to create the GitHub Release, which the default
+`GITHUB_TOKEN` cannot do on a protected branch. Set up a dedicated token:
 
 1. Create a **Personal Access Token (classic)** or **GitHub App token** with `Contents: write` scope on this repository.
 2. Add it as a repository secret named **`GH_TOKEN`** (Settings → Secrets and variables → Actions → New repository secret).
-3. Never push tags by hand — the release pipeline creates and pushes all tags.
+3. Do not hand-push tags for versions that don't match `pyproject.toml` — the tag
+   name and `[project].version` must agree, or the release fails the version-match gate.
 
 ### Files Managed by the Release Pipeline
 
-> **Do not edit these files manually.** They are now managed by `python-semantic-release`.
+> **Do not edit these files manually during a release.**
 
-| File | Managed by |
-|------|------------|
-| `pyproject.toml` → `[project].version` | `python-semantic-release` (on release) |
-| `CHANGELOG.md` | `python-semantic-release` (on release) |
-| Git tags `v*.*.*` | `python-semantic-release` (on release) |
+| File | Owner |
+|------|-------|
+| `pyproject.toml` → `[project].version` | **maintainer** — bumped in the release-prep commit; also the version the release tag must match |
+| `CHANGELOG.md` | `semantic-release.yml` (regenerated for the tag, best-effort commit to `main`) |
+| Git tags `v*.*.*` | **maintainer** — you push the tag that triggers the release |
+| GitHub Release object | `semantic-release.yml` (created once per tag) |
+| Release binary + SHA256 | `release.yml` (attached to the Release) |
 
 ## Troubleshooting
 

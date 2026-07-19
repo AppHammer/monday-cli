@@ -49,6 +49,12 @@ def _run_cli_until(
     read (eventual consistency on the board's `items_page`), so a read right
     after a create needs a bounded poll rather than a single shot -- mirrors
     the `_list_until_present` pattern in test_items_status.py.
+
+    NOTE: kept for backwards compatibility with the FR-0009 tests (lines
+    ~285-294 below), which pre-date the ``poll_until`` helper introduced in
+    FR-0013.  The two helpers do the same job with different call signatures
+    (positional varargs vs. tuple); if the FR-0009 tests are ever refactored,
+    remove this function and use ``poll_until`` throughout.
     """
     result: Any = None
     for attempt in range(attempts):
@@ -147,7 +153,7 @@ def test_update_status_round_trips_via_get(created_item: Callable[..., str]) -> 
         matches = [cv for cv in d.get("column_values", []) if cv.get("id") == column_id]
         return len(matches) == 1 and matches[0].get("text") == label
 
-    fetched = poll_until(_has_label, ("items", "get", "--item-id", item_id), expect_error=True)
+    fetched = poll_until(_has_label, ("items", "get", "--item-id", item_id))
     matches = [cv for cv in fetched["column_values"] if cv.get("id") == column_id]
     assert len(matches) == 1
     assert matches[0].get("text") == label
@@ -393,8 +399,9 @@ def test_delete_removes_item_and_list_confirms_removal(
     # items_page for a moment -- so retry rather than assert on one shot.
     #
     # FR-0013: Scope the assertion to the deleted item's ID only, not to an
-    # empty group. Parallel test runs may create items in the same group (if
-    # Monday reuses group IDs), so asserting items == [] would be fragile.
+    # empty group. The group is freshly created per-run, but asserting
+    # items == [] would be fragile: a concurrent test could have added an item
+    # to this group in the window between our delete mutation and this read.
     list_data = poll_until(
         lambda d: isinstance(d, dict) and item_id not in {str(i["id"]) for i in d.get("items", [])},
         (

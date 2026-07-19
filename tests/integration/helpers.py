@@ -205,9 +205,12 @@ def poll_until(
 
     Args:
         predicate: A callable that accepts the ``run_cli`` result and returns
-            ``True`` when the result satisfies the test's pre-condition. It
-            must not raise; an exception from the predicate is treated as
-            ``False`` (i.e., "not yet satisfied") and the retry continues.
+            ``True`` when the result satisfies the test's pre-condition.
+            If the predicate raises (e.g. ``IndexError`` on an empty list,
+            ``KeyError`` on a missing key), the exception is caught and treated
+            as ``False`` (i.e., "not yet satisfied") — the retry continues.
+            Write predicates defensively so they return ``False`` for results
+            that don't yet have the expected shape.
         cli_args: The positional CLI arguments to pass to ``run_cli`` on each
             attempt, e.g. ``("items", "list", "--board-id", board_id)``.
         attempts: Maximum number of invocations (default 8). Each attempt is
@@ -238,19 +241,27 @@ def poll_until(
     for attempt in range(attempts):
         try:
             result = run_cli(*cli_args, **run_cli_kwargs)
-        except Exception:
-            # Transient CLI failures (e.g. a non-zero exit when expect_error is
-            # not set) are treated as "not yet satisfied" so the poll continues
-            # rather than propagating. The final ``result`` remains whatever it
-            # was from the last successful ``run_cli`` call (or None if every
-            # attempt raised). Callers must assert on the returned result —
-            # ``poll_until`` never raises on timeout.
+        except AssertionError:
+            # ``run_cli`` raises ``AssertionError`` (specifically
+            # ``CliOutputError``, a subclass) when the CLI exits non-zero and
+            # ``expect_error`` is False, or when stdout is not clean JSON.
+            # Treat this as "not yet satisfied" and retry — it is the expected
+            # signal for eventual-consistency lag (e.g. a freshly-created item
+            # not yet visible in an ``items list`` index read).
+            #
+            # Genuine programmer errors (``TypeError``, ``AttributeError``,
+            # bad kwarg names, etc.) are NOT ``AssertionError`` and therefore
+            # propagate immediately rather than being masked by the retry loop.
             if attempt < attempts - 1:
                 time.sleep(delay)
             continue
         try:
             satisfied = predicate(result)
         except Exception:
+            # Predicate exceptions (e.g. IndexError on an empty list, KeyError
+            # on a missing key) are treated as "not yet satisfied" and the poll
+            # retries.  The predicate should guard its own key accesses; if it
+            # raises, the result is simply not yet in the expected shape.
             satisfied = False
         if satisfied:
             return result

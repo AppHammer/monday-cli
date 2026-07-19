@@ -314,6 +314,7 @@ def test_empty_group_returns_valid_json_not_prose(
         "--group-id",
         group_id,
     )
+
     assert exit_code == 0, f"Expected exit 0 for empty result; got {exit_code}\nstderr: {stderr}"
     _assert_clean_stdout(stdout, "items list empty group")
     data = json.loads(stdout.strip())

@@ -292,9 +292,10 @@ def test_empty_group_returns_valid_json_not_prose(
     assert data.get("items") == []
     assert data.get("items_count") == 0
     assert data.get("group_id_filter") == group_id
-    # The human tip must be on stderr, not stdout
+    # FR-0009 Epic B2: a valid-but-empty group is a clean, silent empty result --
+    # no "No items found"/"Tip" prose on either stream (only an UNKNOWN group errors).
     assert "No items found" not in stdout
-    assert "No items found" in stderr or "Tip" in stderr
+    assert stderr.strip() == ""
 
 
 @pytest.mark.integration

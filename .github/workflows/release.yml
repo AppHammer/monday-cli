@@ -49,7 +49,17 @@ jobs:
       # there is a brief window where the tag exists but the Release does not.
       # If we attempt upload before the Release exists, softprops/action-gh-release
       # will create a second Release — breaking the single-release guarantee.
-      # We poll the GitHub API for up to 5 minutes before proceeding.
+      #
+      # Window sizing: both workflows trigger off the same tag push, so this wait
+      # races semantic-release.yml's "release" job, which only creates the Release
+      # AFTER its "test" job (checkout + Python setup + `pip install -e ".[dev]"`)
+      # completes, then does a second `pip install -e ".[dev]"` of its own before
+      # reaching the `gh release create` step. That worst case (two dependency
+      # installs + a full unit-test run on a cold runner) can exceed 5 minutes, so
+      # the wait window here must comfortably exceed it. Keep this window >=
+      # semantic-release.yml's worst-case test+install+release time; if that job
+      # grows, widen this loop to match.
+      # We poll the GitHub API for up to ~15 minutes before proceeding.
       - name: Wait for GitHub Release to exist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -57,18 +67,18 @@ jobs:
           TAG="${{ github.ref_name }}"
           REPO="${{ github.repository }}"
           echo "Waiting for GitHub Release for tag $TAG ..."
-          for i in $(seq 1 30); do
+          for i in $(seq 1 90); do
             STATUS=$(gh release view "$TAG" --repo "$REPO" 2>&1 && echo "found" || echo "not_found")
             if echo "$STATUS" | grep -q "found"; then
               echo "✓ Release found after ${i}x10s = $((i*10))s"
               break
             fi
-            echo "  attempt $i/30 — release not yet available, retrying in 10s..."
+            echo "  attempt $i/90 — release not yet available, retrying in 10s..."
             sleep 10
           done
-          # Final check — fail if still not found after 5 minutes
+          # Final check — fail if still not found after ~15 minutes
           gh release view "$TAG" --repo "$REPO" || {
-            echo "ERROR: GitHub Release for $TAG was not found after 5 minutes."
+            echo "ERROR: GitHub Release for $TAG was not found after 15 minutes."
             echo "PSR may have encountered an error creating the Release."
             exit 1
           }

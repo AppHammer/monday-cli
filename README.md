@@ -819,6 +819,15 @@ The tag push (and only the tag push) drives the release:
 push a tag. **Out of scope:** PyPI / package-index publishing. Releases are distributed
 as binary assets only.
 
+**`workflow_dispatch` limitation:** dispatching `semantic-release.yml` manually creates
+or updates the GitHub Release, but it does **not** attach the binary — `release.yml`
+only triggers on a `push: tags:` event, so a dispatch run of `semantic-release.yml`
+never fires it. Treat `workflow_dispatch` as a changelog/Release-object fallback only
+(e.g. re-creating the Release for a tag that already exists). To get a binary attached,
+push the `vX.Y.Z` tag so both workflows fire together; if you already dispatched
+`semantic-release.yml` and need the binary, separately dispatch `release.yml` for the
+same tag.
+
 ### Release Bot Token Setup
 
 `semantic-release.yml` needs to push the best-effort CHANGELOG commit to a

@@ -785,7 +785,7 @@ checks to fire):
 
 ```bash
 # one-off: download the pinned binary
-curl -sSL https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz | tar xz actionlint
+curl -sSfL https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz | tar -xz actionlint
 ./actionlint            # lint all workflows; exit 0 = clean
 ```
 

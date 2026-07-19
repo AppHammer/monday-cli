@@ -17,8 +17,11 @@ concurrency:
 
 # Pin actionlint deterministically so a new upstream release cannot turn a green PR
 # red without an explicit bump here. Matches the version FR-0010 validated against.
+# ACTIONLINT_SHA256 is the published checksum for actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz,
+# verified before extraction below so a compromised or corrupted download fails closed.
 env:
   ACTIONLINT_VERSION: "1.7.7"
+  ACTIONLINT_SHA256: "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757"
 
 jobs:
   actionlint:
@@ -31,9 +34,10 @@ jobs:
 
       - name: Download pinned actionlint binary
         run: |
-          curl -sSfL \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
-            | tar -xz actionlint
+          curl -sSfL -o actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xz actionlint -f actionlint.tar.gz
           ./actionlint --version
 
       - name: Run actionlint

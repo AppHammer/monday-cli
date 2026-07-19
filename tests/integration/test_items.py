@@ -237,8 +237,12 @@ def test_g_by_id_equals_group_id_and_title_path(
 
 @pytest.mark.integration
 def test_unknown_group_is_teaching_error(test_board_id: str) -> None:
-    """FR-0009 B2: an unknown `-g` value exits non-zero and lists groups."""
-    output = run_cli(
+    """FR-0009 B2: an unknown `-g` value exits non-zero and lists groups.
+
+    Post-FR-0008 the teaching error is emitted on stderr (stdout stays clean),
+    so assert against the captured stderr stream.
+    """
+    stdout, stderr = run_cli(
         "items",
         "list",
         "--board-id",
@@ -246,8 +250,10 @@ def test_unknown_group_is_teaching_error(test_board_id: str) -> None:
         "-g",
         "definitely-not-a-real-group-xyz",
         expect_error=True,
+        capture_stderr=True,
     )
-    assert "Available groups" in output
+    assert "Available groups" in stderr
+    assert stdout.strip() == ""  # FR-0008: stdout stays clean on error
 
 
 @pytest.mark.integration

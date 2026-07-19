@@ -1,6 +1,29 @@
 # CHANGELOG
 
 
+## v0.6.2 (2026-07-19)
+
+### Bug Fixes
+
+- Bundle rich._unicode_data so --table works in the frozen binary (FR-0007)
+  ([#62](https://github.com/AppHammer/monday-cli/pull/62),
+  [`23828d9`](https://github.com/AppHammer/monday-cli/commit/23828d9747eb55fde37bcf654630f293293493e8))
+
+PyInstaller --collect-submodules=rich._unicode_data + hermetic build guard + release.yml --table
+  regression guard.
+
+Closes #46, closes #47
+
+- **output**: Route diagnostic output to stderr, guarantee clean JSON stdout (FR-0008)
+  ([#63](https://github.com/AppHammer/monday-cli/pull/63),
+  [`4d82a87`](https://github.com/AppHammer/monday-cli/commit/4d82a8777037997a5826dcb2ad67848611bf5867))
+
+CLI-wide clean-stdout contract: secho_err/eprint helpers, all diagnostics to stderr, empty-result
+  JSON, stdout-contract AST guard + integration tests.
+
+Closes #37, closes #48, closes #49, closes #50, closes #51, closes #52, closes #53, closes #54
+
+
 ## v0.6.1 (2026-07-18)
 
 ### Bug Fixes

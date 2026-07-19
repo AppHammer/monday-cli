@@ -52,3 +52,13 @@ DOC_CLEAR_MAX_TOTAL_DELETES = 10_000
 # This is a page-based (1-indexed) bound, distinct from the iteration-based
 # DOC_CLEAR_MAX_ITERATIONS used in _delete_all_doc_blocks.
 DOC_SCAN_MAX_PAGES = 1_000
+
+# Bounded retry for CREATE_DOC after a freshly-created item (eventual consistency).
+# Monday's API can briefly return "Item not found" for items that were just created
+# (BUG-2/FR-0015). When CREATE_DOC returns that specific transient error, the call
+# is retried up to DOC_CREATE_RETRY_ATTEMPTS total times (not additional retries on
+# top of an initial attempt — the first attempt counts toward this total).
+# DOC_CREATE_RETRY_DELAY is the sleep between consecutive attempts.
+# Non-transient errors are never retried; only "item not found" triggers this path.
+DOC_CREATE_RETRY_ATTEMPTS = 4  # total attempts (1 initial + up to 3 retries) for CREATE_DOC
+DOC_CREATE_RETRY_DELAY = 2.0  # seconds to wait between consecutive attempts

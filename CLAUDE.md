@@ -169,6 +169,7 @@ merge to main → tests.yml (gate) → semantic-release.yml:
 |----------|---------|---------|
 | `tests.yml` | push/PR | Unit tests (gate for release) |
 | `quality.yml` | push/PR | Lint & type-check gate (ruff + black --check + mypy) |
+| `actionlint.yml` | push/PR | Lints the workflow files themselves (YAML, `run:` shell via shellcheck, `uses:` refs, `${{ }}` exprs); pinned actionlint `1.7.7`, no secrets. Errors fail the PR. Recommended as a required branch-protection check. |
 | `commit-lint.yml` | PR | Enforces Conventional Commits |
 | `semantic-release.yml` | push to main | Version bump + tag + changelog |
 | `release.yml` | tag `v*.*.*` | Build + attach Linux binary |

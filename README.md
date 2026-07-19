@@ -752,6 +752,50 @@ ruff check src/ tests/
 mypy src/
 ```
 
+## Continuous Integration
+
+Every pull request runs a set of GitHub Actions checks under `.github/workflows/`:
+
+| Workflow | What it does | Secrets |
+|----------|--------------|---------|
+| `quality.yml` | `ruff`, `black --check`, `mypy` | none |
+| `tests.yml` | `pytest tests/unit` | none |
+| `commit-lint.yml` | Conventional-commit header validation | none |
+| `integration.yml` | Live integration suite against the test board | `MONDAY_API_TOKEN` (skips on forks) |
+| `actionlint.yml` | **Lints the workflow files themselves** | none |
+
+### Workflow linting (actionlint)
+
+`.github/workflows/actionlint.yml` runs [actionlint](https://github.com/rhysd/actionlint)
+on every pull request (and on pushes to `main`) to catch workflow-file defects
+**before merge** instead of at runtime on `main` — malformed YAML, broken `run:`
+shell (via bundled shellcheck), deprecated/mispinned `uses:` refs, and invalid
+`${{ }}` expressions. This class of defect has bitten `main` before (e.g. a
+release-workflow startup failure that nothing linted). The job:
+
+- **Fails the PR** on any actionlint **error**; upstream warnings stay non-fatal.
+- **Pins actionlint to a version** (`ACTIONLINT_VERSION`, currently `1.7.7`) via the
+  official static-binary download — no third-party action in the trust surface, and
+  it re-lints deterministically rather than breaking when upstream ships new rules.
+- **Needs no repository secrets**, so it runs on forked-PR contributions too, and
+  completes in seconds.
+
+Run it locally the same way CI does (shellcheck must be on `PATH` for the `run:`
+checks to fire):
+
+```bash
+# one-off: download the pinned binary
+curl -sSL https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz | tar xz actionlint
+./actionlint            # lint all workflows; exit 0 = clean
+```
+
+**Recommendation — make this a required check.** Once green on `main`, promote
+`actionlint` to a **required branch-protection check** (Settings → Branches →
+branch protection rule for `main` → *Require status checks to pass*). It is fast,
+deterministic, and needs no secrets, so it is safe as a required gate and closes
+the "broke `main` because nothing linted workflows" gap for good. This is a
+maintainer decision; the workflow itself does not change branch protection.
+
 ## Release Process (Conventional Commits)
 
 monday-cli uses **Conventional Commits** as the source of truth for all versioning and changelog generation. Every commit to `main` (via PR) must conform to the spec, and the release pipeline derives the next version automatically from commit types.

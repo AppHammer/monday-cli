@@ -27,7 +27,10 @@ from __future__ import annotations
 
 import os
 import secrets
+import time
+import warnings
 from collections.abc import Callable, Iterator, Mapping
+from typing import Any
 
 import pytest
 
@@ -101,15 +104,63 @@ def run_id() -> str:
     return f"it-{os.getpid()}-{secrets.token_hex(3)}"
 
 
-def _swallow_not_found(*args: str) -> None:
-    """Run a delete command, tolerating an artifact that's already gone.
+_TEARDOWN_MAX_ATTEMPTS = 3
+_TEARDOWN_BACKOFF_SECONDS = 1.5
+
+
+def _swallow_not_found(
+    *args: str,
+    max_attempts: int = _TEARDOWN_MAX_ATTEMPTS,
+    backoff_seconds: float = _TEARDOWN_BACKOFF_SECONDS,
+) -> None:
+    """Run a delete command, tolerating an artifact that's already gone --
+    but never silently swallowing a REAL teardown failure.
 
     Delete commands in this CLI exit 1 with a "not found" message when the
-    target no longer exists. Teardown must be idempotent -- if the test body
-    already deleted the artifact (or errored after partially cleaning up),
-    that must not fail the harness.
+    target no longer exists; that specific case is expected and idempotent
+    (the test body may have already deleted the artifact, or errored after
+    partially cleaning up), so it is swallowed unconditionally.
+
+    Any OTHER outcome -- a transient blip (rate limit, network hiccup) or a
+    genuine API error -- is retried a bounded number of times with a short
+    backoff, since a single `expect_error=True` attempt can't tell "already
+    gone" apart from "delete failed" and previously discarded both the same
+    way, silently leaking artifacts on the shared TEST board. If the artifact
+    still can't be confirmed deleted after all attempts, this surfaces a
+    `pytest.warns`-visible warning (never an exception -- teardown must not
+    raise, or it would abort every other fixture's teardown in the same
+    test's stack) so a real leak shows up in the test run instead of
+    vanishing.
     """
-    run_cli(*args, expect_error=True)
+    last_output: Any = None
+    last_exc: BaseException | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            last_output = run_cli(*args, expect_error=True)
+            last_exc = None
+        except Exception as exc:  # pragma: no cover - defensive; teardown must not raise
+            last_exc = exc
+            last_output = None
+
+        if last_exc is None:
+            if isinstance(last_output, str) and "not found" in last_output.lower():
+                return  # Genuinely already gone -- expected, idempotent teardown.
+            if not isinstance(last_output, str):
+                return  # `run_cli` returned parsed JSON -- the delete succeeded (exit 0).
+
+        if attempt < max_attempts:
+            time.sleep(backoff_seconds * attempt)
+
+    detail = repr(last_exc) if last_exc is not None else last_output
+    warnings.warn(
+        "Integration teardown could not confirm deletion after "
+        f"{max_attempts} attempts: monday {' '.join(args)}\n"
+        f"Last output: {detail}\n"
+        "This artifact may still exist on the shared TEST board and require "
+        "manual cleanup.",
+        stacklevel=2,
+    )
 
 
 @pytest.fixture

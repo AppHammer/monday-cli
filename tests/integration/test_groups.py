@@ -11,6 +11,12 @@ never collide with a parallel run.
 response shape and `delete`'s residue check create/delete their own group
 directly rather than through the factory, wrapping in try/finally for
 failure-safe cleanup. Both use a title unique to this test run.
+
+FR-0013: Uses ``poll_until`` from the shared harness to absorb eventual-
+consistency lag between a group create/delete mutation and the change being
+visible in ``groups list``. Assertions are scoped to run-owned groups
+(identified by ``run_id`` prefix) and never assume the full board group list
+is owned only by this test run.
 """
 
 from __future__ import annotations
@@ -19,7 +25,7 @@ from collections.abc import Callable
 
 import pytest
 
-from tests.integration.helpers import run_cli
+from tests.integration.helpers import poll_until, run_cli
 
 
 @pytest.mark.integration
@@ -65,7 +71,13 @@ def test_created_group_appears_in_list(
     group_id = created_group("list-check", color="#037f4c")
     expected_title = f"{run_id}-list-check"
 
-    data = run_cli("groups", "list", "--board-id", test_board_id)
+    # Bounded poll: a freshly-created group may not be immediately visible in
+    # ``groups list`` due to eventual consistency; retry until it appears.
+    data = poll_until(
+        lambda d: isinstance(d, dict)
+        and any(g.get("title") == expected_title for g in d.get("groups", [])),
+        ("groups", "list", "--board-id", test_board_id),
+    )
 
     assert isinstance(data, dict)
     assert data.get("board_id") == test_board_id
@@ -112,7 +124,13 @@ def test_delete_removes_group_and_list_confirms_residue(test_board_id: str, run_
         # this account/board even when the group is genuinely removed, so the
         # residue check below (not this flag) is the authoritative signal.
 
-        list_data = run_cli("groups", "list", "--board-id", test_board_id)
+        # Bounded poll: group deletion may not be immediately reflected in
+        # ``groups list``; poll until the deleted title is absent.
+        list_data = poll_until(
+            lambda d: isinstance(d, dict)
+            and title not in {g.get("title") for g in d.get("groups", [])},
+            ("groups", "list", "--board-id", test_board_id),
+        )
         remaining_titles = {g.get("title") for g in list_data.get("groups", [])}
         assert title not in remaining_titles
     finally:

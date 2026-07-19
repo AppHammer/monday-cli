@@ -13,6 +13,11 @@ Tests are organized by acceptance criteria from the FR-0008 FRD:
 
 All tests use the TEST board 18422673411.  Tests skip cleanly when
 ``MONDAY_API_TOKEN`` is not set and tear down every artifact even on failure.
+
+FR-0013: AC-5 empty-group test creates its own fresh throwaway group via the
+factory fixture (already the existing pattern) and uses a bounded poll after
+group creation to absorb eventual-consistency lag before asserting the group
+is empty, ensuring the test never depends on pre-existing board state.
 """
 
 from __future__ import annotations
@@ -23,7 +28,7 @@ from collections.abc import Callable
 
 import pytest
 
-from tests.integration.helpers import run_cli, run_cli_streams
+from tests.integration.helpers import poll_until, run_cli, run_cli_streams
 
 
 def _skip_if_no_token() -> None:
@@ -272,11 +277,35 @@ def test_invalid_column_title_exits_nonzero_with_no_prose_on_stdout(
 def test_empty_group_returns_valid_json_not_prose(
     created_group: Callable[..., str], test_board_id: str
 ) -> None:
-    """AC-5: group with no items returns valid JSON (empty items array), exit 0."""
+    """AC-5: group with no items returns valid JSON (empty items array), exit 0.
+
+    FR-0013: Creates a fresh throwaway group via the factory fixture so this
+    test never depends on a shared group that other tests or prior runs may
+    have populated. Uses a bounded poll to absorb the brief eventual-consistency
+    window between group creation and the group being queryable via
+    ``items list --group-id``.
+    """
     _skip_if_no_token()
     group_id = created_group("ac5-empty")
-    # Do NOT create any items in this group
+    # Do NOT create any items in this group.
+    # Use a bounded poll: a freshly-created empty group may not be immediately
+    # queryable via items_page; poll until the query returns a valid empty
+    # result rather than asserting on the first response.
+    poll_until(
+        lambda d: isinstance(d, dict)
+        and d.get("items") == []
+        and d.get("group_id_filter") == group_id,
+        (
+            "items",
+            "list",
+            "--board-id",
+            test_board_id,
+            "--group-id",
+            group_id,
+        ),
+    )
 
+    # Final FR-0008 stdout-contract check via run_cli_streams (captures raw streams).
     stdout, stderr, exit_code = run_cli_streams(
         "items",
         "list",
@@ -285,7 +314,6 @@ def test_empty_group_returns_valid_json_not_prose(
         "--group-id",
         group_id,
     )
-
     assert exit_code == 0, f"Expected exit 0 for empty result; got {exit_code}\nstderr: {stderr}"
     _assert_clean_stdout(stdout, "items list empty group")
     data = json.loads(stdout.strip())
@@ -302,10 +330,30 @@ def test_empty_group_returns_valid_json_not_prose(
 def test_items_list_all_empty_group_returns_valid_json(
     created_group: Callable[..., str], test_board_id: str
 ) -> None:
-    """AC-5: items list --all with empty group returns valid JSON, exit 0."""
+    """AC-5: items list --all with empty group returns valid JSON, exit 0.
+
+    FR-0013: Stabilizes via ``poll_until`` before the FR-0008 stdout-contract
+    check so eventual-consistency lag after group creation cannot cause a
+    spurious failure.
+    """
     _skip_if_no_token()
     group_id = created_group("ac5-all-empty")
 
+    # Stabilise: wait until the freshly-created group is queryable as empty.
+    poll_until(
+        lambda d: isinstance(d, dict) and d.get("items") == [],
+        (
+            "items",
+            "list",
+            "--board-id",
+            test_board_id,
+            "--group-id",
+            group_id,
+            "--all",
+        ),
+    )
+
+    # FR-0008 stdout-contract check via run_cli_streams.
     stdout, stderr, exit_code = run_cli_streams(
         "items",
         "list",

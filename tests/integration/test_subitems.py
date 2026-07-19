@@ -23,7 +23,7 @@ from collections.abc import Callable
 
 import pytest
 
-from tests.integration.helpers import run_cli
+from tests.integration.helpers import poll_until, run_cli
 
 
 @pytest.mark.integration
@@ -67,7 +67,12 @@ def test_list_by_item_id_returns_subitem(
     parent_id = created_item("list-item-parent")
     subitem_id = created_subitem(parent_id, "list-item-child")
 
-    data = run_cli("subitems", "list", "--item-id", parent_id)
+    # Bounded poll: the subitems list can briefly lag after creation.
+    data = poll_until(
+        lambda d: isinstance(d, dict)
+        and any(str(s.get("id")) == subitem_id for s in d.get("subitems", [])),
+        ("subitems", "list", "--item-id", parent_id),
+    )
 
     assert isinstance(data, dict)
     assert data.get("parent_item_id") == parent_id
@@ -93,6 +98,16 @@ def test_list_table_output_renders_without_error(
 def test_list_by_board_id_exercises_pagination(
     created_item: Callable[..., str], created_subitem: Callable[..., str]
 ) -> None:
+    """Exercises the board-level ``subitems list --board-id`` pagination path.
+
+    FR-0013: Scoped assertions:
+    - Pagination CONTRACT (has_more, cursor, board_id keys) is verified
+      immediately since these depend only on the board's existing index state,
+      not on the newly-created subitem being propagated.
+    - The presence of the new subitem in ``--all`` is verified via a
+      bounded poll to absorb the subitems board's potentially long eventual-
+      consistency window (observed > 12 s in practice).
+    """
     parent_id = created_item("board-list-parent")
     subitem_id = created_subitem(parent_id, "board-list-child")
 
@@ -129,7 +144,16 @@ def test_list_by_board_id_exercises_pagination(
         assert isinstance(next_page, dict)
         assert isinstance(next_page.get("subitems"), list)
 
-    all_data = run_cli("subitems", "list", "--board-id", subitems_board_id, "--all")
+    # Bounded poll: the subitems board's items_page index can lag significantly
+    # after a new subitem is created (observed: >12 s). Poll up to 60 s before
+    # asserting the subitem appears in the full board listing.
+    all_data = poll_until(
+        lambda d: isinstance(d, dict)
+        and subitem_id in {str(s.get("id")) for s in d.get("subitems", [])},
+        ("subitems", "list", "--board-id", subitems_board_id, "--all"),
+        attempts=20,
+        delay=3.0,
+    )
 
     assert isinstance(all_data, dict)
     assert "pages_fetched" in all_data
@@ -213,7 +237,15 @@ def test_update_status_round_trips_via_get(
     )
     assert isinstance(update_data, dict)
 
-    get_data = run_cli("subitems", "get", "--subitem-id", subitem_id)
+    # ``subitems get`` by ID is strongly consistent, but poll briefly to absorb
+    # any transient propagation delay before asserting the column value.
+    def _has_label(d: object) -> bool:
+        if not isinstance(d, dict):
+            return False
+        matches = [c for c in d.get("column_values", []) if c.get("id") == column_id]
+        return len(matches) == 1 and matches[0].get("text") == label
+
+    get_data = poll_until(_has_label, ("subitems", "get", "--subitem-id", subitem_id))
     column_values = get_data.get("column_values", [])
     matches = [c for c in column_values if c.get("id") == column_id]
     assert len(matches) == 1

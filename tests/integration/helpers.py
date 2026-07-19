@@ -87,10 +87,13 @@ def _env_float(name: str, default: float) -> float:
     return value if value >= 0 else default
 
 
-def _ratelimit_retries() -> int:
-    """Max transparent retries for a rate-limited CLI invocation.
+def _max_retries() -> int:
+    """Max transparent retries shared across all transient-failure categories.
 
-    Controlled by ``MONDAY_IT_RATELIMIT_RETRIES``.
+    The same counter budget covers both rate-limit (429) and transient server
+    error (5xx) retries, so the total number of extra attempts is bounded by
+    this value regardless of which error type is encountered.  Controlled by
+    ``MONDAY_IT_RATELIMIT_RETRIES``.
     """
     return _env_int("MONDAY_IT_RATELIMIT_RETRIES", _DEFAULT_RATELIMIT_RETRIES)
 
@@ -221,7 +224,7 @@ def run_cli(
     # _ratelimit_retries() times, sleeping for the Retry-After value that the
     # CLI already extracted from the response header (visible in stderr) before
     # falling through to the normal assertion path on the final attempt.
-    max_retries = _ratelimit_retries()
+    max_retries = _max_retries()
     default_backoff = _ratelimit_backoff()
 
     binary = os.environ.get("MONDAY_CLI_BIN")

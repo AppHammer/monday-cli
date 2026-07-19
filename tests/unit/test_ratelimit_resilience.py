@@ -1,7 +1,7 @@
 """[FR-0016] Unit tests for rate-limit resilience in the integration test harness.
 
 The new ``run_cli`` retry loop and its supporting helpers (``_is_rate_limit_exit``,
-``_parse_retry_after``, ``_ratelimit_retries``, ``_ratelimit_backoff``) are pure
+``_parse_retry_after``, ``_max_retries``, ``_ratelimit_backoff``) are pure
 functions that can be exercised without a real Monday.com API token.  These tests
 confirm that:
 
@@ -11,6 +11,7 @@ confirm that:
 - ``expect_error=True`` calls are never transparently retried (they assert error paths).
 - Real (non-rate-limit) failures are NOT retried and surface immediately.
 - Env-var tuning for retries and backoff works correctly.
+- ``_WaitRateLimitOrExponential`` uses Retry-After when present, exponential otherwise.
 """
 
 from __future__ import annotations
@@ -122,19 +123,19 @@ def test_parse_retry_after(stderr: str, expected: float | None) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_ratelimit_retries_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_max_retries_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MONDAY_IT_RATELIMIT_RETRIES", "10")
-    assert helpers._ratelimit_retries() == 10
+    assert helpers._max_retries() == 10
 
 
-def test_ratelimit_retries_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_max_retries_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MONDAY_IT_RATELIMIT_RETRIES", raising=False)
-    assert helpers._ratelimit_retries() == helpers._DEFAULT_RATELIMIT_RETRIES
+    assert helpers._max_retries() == helpers._DEFAULT_RATELIMIT_RETRIES
 
 
-def test_ratelimit_retries_default_on_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_max_retries_default_on_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MONDAY_IT_RATELIMIT_RETRIES", "not-a-number")
-    assert helpers._ratelimit_retries() == helpers._DEFAULT_RATELIMIT_RETRIES
+    assert helpers._max_retries() == helpers._DEFAULT_RATELIMIT_RETRIES
 
 
 def test_ratelimit_backoff_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -291,3 +292,88 @@ def test_run_cli_falls_back_to_default_backoff_when_no_retry_after(
     helpers.run_cli("items", "get", "--item-id", "1")
 
     assert slept == [helpers._DEFAULT_RATELIMIT_BACKOFF]
+
+
+# ---------------------------------------------------------------------------
+# _WaitRateLimitOrExponential (client-layer tenacity wait strategy)
+# ---------------------------------------------------------------------------
+
+
+def _make_retry_state(exc: BaseException | None, attempt_number: int = 1) -> Any:
+    """Build a minimal fake ``RetryCallState`` carrying the given exception.
+
+    ``_WaitRateLimitOrExponential.__call__`` reads ``retry_state.outcome`` to
+    extract the exception, and delegates to ``wait_exponential`` which reads
+    ``retry_state.attempt_number`` to compute the backoff.  We stub both.
+    """
+    from unittest.mock import MagicMock
+
+    state = MagicMock()
+    state.attempt_number = attempt_number
+    if exc is None:
+        state.outcome = None
+    else:
+        outcome = MagicMock()
+        outcome.exception.return_value = exc
+        state.outcome = outcome
+    return state
+
+
+def test_wait_uses_retry_after_when_rate_limit_error_carries_it() -> None:
+    """When RateLimitError.retry_after is set, sleep = retry_after + 2s buffer."""
+    from monday_cli.utils.error_handler import RateLimitError
+    from monday_cli.utils.retry import _WaitRateLimitOrExponential
+
+    wait = _WaitRateLimitOrExponential(multiplier=1.0, min_wait=1.0, max_wait=60.0)
+    exc = RateLimitError(retry_after=45)
+    state = _make_retry_state(exc)
+
+    result = wait(state)
+
+    # 45 s Retry-After + 2 s buffer
+    assert result == 47.0
+
+
+def test_wait_falls_back_to_exponential_when_rate_limit_has_no_retry_after() -> None:
+    """When RateLimitError.retry_after is None/falsy, exponential backoff is used."""
+    from monday_cli.utils.error_handler import RateLimitError
+    from monday_cli.utils.retry import _WaitRateLimitOrExponential
+
+    wait = _WaitRateLimitOrExponential(multiplier=1.0, min_wait=1.0, max_wait=60.0)
+    exc = RateLimitError(retry_after=None)
+    state = _make_retry_state(exc)
+
+    # Exponential wait with attempt_number=1 returns min_wait (1s) for the first
+    # attempt.  We only care that the result is a float and is NOT retry_after-based.
+    result = wait(state)
+
+    assert isinstance(result, float)
+    # The exponential branch is used, so the result is min_wait (1s) or greater
+    assert result >= 1.0
+
+
+def test_wait_falls_back_to_exponential_for_non_rate_limit_exception() -> None:
+    """For any exception that is not RateLimitError, exponential backoff is used."""
+    from monday_cli.utils.retry import _WaitRateLimitOrExponential
+
+    wait = _WaitRateLimitOrExponential(multiplier=1.0, min_wait=2.0, max_wait=60.0)
+    exc = ConnectionError("network blip")
+    state = _make_retry_state(exc)
+
+    result = wait(state)
+
+    assert isinstance(result, float)
+    assert result >= 2.0
+
+
+def test_wait_falls_back_to_exponential_when_outcome_is_none() -> None:
+    """When retry_state.outcome is None (no exception recorded), exponential is used."""
+    from monday_cli.utils.retry import _WaitRateLimitOrExponential
+
+    wait = _WaitRateLimitOrExponential(multiplier=1.0, min_wait=3.0, max_wait=60.0)
+    state = _make_retry_state(None)
+
+    result = wait(state)
+
+    assert isinstance(result, float)
+    assert result >= 3.0

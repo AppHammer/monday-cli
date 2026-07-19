@@ -45,6 +45,17 @@ _RATE_LIMIT_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
+# Transient Monday.com server-side errors that are safe to retry at the
+# harness level.  These are distinct from rate-limit (429) responses: they
+# are internal server errors (5xx-class) returned as GraphQL error payloads
+# that the CLI propagates as a non-zero exit.  A short fixed backoff (5 s)
+# is sufficient because these errors usually clear within seconds.
+_TRANSIENT_SERVER_ERROR_PATTERNS = re.compile(
+    r"internal server error|503|service unavailable|temporarily unavailable",
+    re.IGNORECASE,
+)
+_DEFAULT_TRANSIENT_BACKOFF = 5.0  # seconds — enough for a Monday 500 to clear
+
 # How many times run_cli will transparently retry a rate-limited invocation
 # before giving up and surfacing the failure.  Tunable via env var so CI can
 # increase headroom without touching code.
@@ -96,6 +107,11 @@ def _ratelimit_backoff() -> float:
 def _is_rate_limit_exit(exit_code: int, stderr: str) -> bool:
     """Return True when a CLI invocation failed due to throttling."""
     return exit_code != 0 and bool(_RATE_LIMIT_PATTERNS.search(stderr))
+
+
+def _is_transient_server_error(exit_code: int, stderr: str) -> bool:
+    """Return True when a CLI invocation failed due to a transient Monday server error."""
+    return exit_code != 0 and bool(_TRANSIENT_SERVER_ERROR_PATTERNS.search(stderr))
 
 
 def _parse_retry_after(stderr: str) -> float | None:
@@ -219,11 +235,16 @@ def run_cli(
         # When expect_error=True the caller explicitly wants a non-zero exit, so
         # we must NOT transparently retry — that would hide a real failure from
         # the caller who is asserting against the error output.
-        if not expect_error and _is_rate_limit_exit(exit_code, stderr) and attempt < max_retries:
-            backoff = _parse_retry_after(stderr) or default_backoff
-            attempt += 1
-            time.sleep(backoff)
-            continue
+        if not expect_error and attempt < max_retries:
+            if _is_rate_limit_exit(exit_code, stderr):
+                backoff = _parse_retry_after(stderr) or default_backoff
+                attempt += 1
+                time.sleep(backoff)
+                continue
+            if _is_transient_server_error(exit_code, stderr):
+                attempt += 1
+                time.sleep(_DEFAULT_TRANSIENT_BACKOFF)
+                continue
 
         break
 

@@ -25,11 +25,33 @@ failing.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 
 from tests.integration.helpers import run_cli
+
+
+def _run_cli_until(
+    predicate: Any, *args: str, attempts: int = 6, delay: float = 1.5, **kwargs: Any
+) -> Any:
+    """Retry a `run_cli` call until `predicate(result)` is true, or give up.
+
+    A freshly created/updated item can briefly lag behind on an `items list`
+    read (eventual consistency on the board's `items_page`), so a read right
+    after a create needs a bounded poll rather than a single shot -- mirrors
+    the `_list_until_present` pattern in test_items_status.py.
+    """
+    result: Any = None
+    for attempt in range(attempts):
+        result = run_cli(*args, **kwargs)
+        if predicate(result):
+            return result
+        if attempt < attempts - 1:
+            time.sleep(delay)
+    return result
 
 
 @pytest.mark.integration
@@ -146,7 +168,20 @@ def test_list_pagination_contract_and_all_pages(
     assert page_2["items_count"] == 1
     assert page_2["items"][0]["id"] != page_1["items"][0]["id"]
 
-    all_data = run_cli("items", "list", "--board-id", test_board_id, "--all", "--limit", "500")
+    # Bounded poll: both items were just created, and an `--all` read can
+    # briefly lag behind on the board's items_page (eventual consistency),
+    # so retry until both are visible rather than asserting on one shot.
+    all_data = _run_cli_until(
+        lambda d: isinstance(d, dict)
+        and {first_id, second_id} <= {str(item["id"]) for item in d.get("items", [])},
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "--all",
+        "--limit",
+        "500",
+    )
 
     assert isinstance(all_data, dict)
     assert "items" in all_data
@@ -168,7 +203,11 @@ def test_group_filtering_returns_only_matching_group(
     item_a = created_item("in-group-a", group_id=group_a)
     created_item("in-group-b", group_id=group_b)
 
-    data = run_cli(
+    # Bounded poll: item_a was just created into group_a, and a group-filtered
+    # `--all` read can briefly lag behind on eventual consistency, so retry
+    # until it's visible rather than asserting on one shot.
+    data = _run_cli_until(
+        lambda d: isinstance(d, dict) and any(str(i["id"]) == item_a for i in d.get("items", [])),
         "items",
         "list",
         "--board-id",
@@ -189,10 +228,95 @@ def test_group_filtering_returns_only_matching_group(
 
 
 @pytest.mark.integration
-def test_list_table_output_renders_without_error(test_board_id: str) -> None:
-    output = run_cli("items", "list", "--board-id", test_board_id, "--table", raw=True)
+def test_g_by_id_equals_group_id_and_title_path(
+    created_group: Callable[..., str], created_item: Callable[..., str], test_board_id: str
+) -> None:
+    """FR-0009 B1: `-g <id>` == `--group-id <id>`, and `-g <title>` matches too."""
+    group_a = created_group("g-parity-a")
+    group_b = created_group("g-parity-b")
+    item_a = created_item("parity-a", group_id=group_a)
+    created_item("parity-b", group_id=group_b)
 
+    common = ["items", "list", "--board-id", test_board_id, "--all", "--limit", "500"]
+
+    # Bounded poll: item_a was just created into group_a, and a group-filtered
+    # `--all` read can briefly lag behind on eventual consistency, so retry
+    # until it's visible rather than asserting on one shot.
+    def _has_item_a(d: Any) -> bool:
+        return isinstance(d, dict) and any(str(i["id"]) == item_a for i in d.get("items", []))
+
+    by_group_id = _run_cli_until(_has_item_a, *common, "--group-id", group_a)
+    by_g_id = _run_cli_until(_has_item_a, *common, "-g", group_a)
+
+    ids_group_id = sorted(str(i["id"]) for i in by_group_id["items"])
+    ids_g_id = sorted(str(i["id"]) for i in by_g_id["items"])
+    assert ids_group_id == ids_g_id == [item_a]
+
+    # Title path resolves to the same group.
+    title_a = run_cli("items", "get", "--item-id", item_a)["group"]["title"]
+    by_g_title = _run_cli_until(_has_item_a, *common, "-g", title_a)
+    assert sorted(str(i["id"]) for i in by_g_title["items"]) == [item_a]
+
+
+@pytest.mark.integration
+def test_unknown_group_is_teaching_error(test_board_id: str) -> None:
+    """FR-0009 B2: an unknown `-g` value exits non-zero and lists groups.
+
+    Post-FR-0008 the teaching error is emitted on stderr (stdout stays clean),
+    so assert against the captured stderr stream.
+    """
+    stdout, stderr = run_cli(
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "-g",
+        "definitely-not-a-real-group-xyz",
+        expect_error=True,
+        capture_stderr=True,
+    )
+    assert "Available groups" in stderr
+    assert stdout.strip() == ""  # FR-0008: stdout stays clean on error
+
+
+@pytest.mark.integration
+def test_list_table_output_renders_group_id(
+    created_group: Callable[..., str], created_item: Callable[..., str], test_board_id: str
+) -> None:
+    """FR-0009 D2: `--table` renders the group id, and JSON carries group{id,title}."""
+    group = created_group("table-groupid")
+    item_id = created_item("table-item", group_id=group)
+
+    # Bounded poll: a read right after create can briefly lag on eventual
+    # consistency (observed flake), so retry rather than assert on one shot.
+    output = _run_cli_until(
+        lambda out: group in out,
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "--table",
+        raw=True,
+    )
     assert output.strip() != ""
+    assert group in output  # the group id token appears in the table
+
+    # D1: every listed item carries group{id,title}; the created one matches.
+    data = _run_cli_until(
+        lambda d: any(str(i["id"]) == item_id for i in d["items"]),
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "--all",
+        "--limit",
+        "500",
+    )
+    for item in data["items"]:
+        if item.get("group") is not None:
+            assert "id" in item["group"] and "title" in item["group"]
+    match = [i for i in data["items"] if str(i["id"]) == item_id]
+    assert match and match[0]["group"]["id"] == group
 
 
 @pytest.mark.integration
@@ -212,23 +336,28 @@ def test_delete_removes_item_and_list_confirms_removal(
     assert delete_data.get("item_id") == item_id
     assert delete_data.get("deleted") is True
 
-    # FR-0008 / US-0008-05: With the group now empty, `items list --group-id`
-    # exits 0 and emits valid JSON with an empty items array — no prose on stdout.
-    list_data, list_stderr = run_cli(
+    # With the group now empty, `items list --group-id` exits 0 and returns a
+    # JSON payload with an empty `items` list (a valid-but-empty group is
+    # distinguishable from an unknown group after FR-0009 Epic B). This is a
+    # clean, silent empty result -- no human-readable "not found" message is
+    # printed for a valid-but-empty group (only an unknown one is an error).
+    #
+    # Bounded poll: a read right after delete can briefly lag on eventual
+    # consistency -- the deleted item can still appear on the board's
+    # items_page for a moment -- so retry rather than assert on one shot.
+    list_data = _run_cli_until(
+        lambda d: isinstance(d, dict) and d.get("items") == [],
         "items",
         "list",
         "--board-id",
         test_board_id,
         "--group-id",
         group_id,
-        capture_stderr=True,
     )
     assert isinstance(list_data, dict)
     assert list_data.get("items") == []
     assert list_data.get("items_count") == 0
     assert list_data.get("group_id_filter") == group_id
-    # The human message must be on stderr, not stdout
-    assert "No items found" in list_stderr
 
     # Idempotent re-delete must not raise -- confirms teardown safety.
     run_cli("items", "delete", "--item-id", item_id, "--force", expect_error=True)

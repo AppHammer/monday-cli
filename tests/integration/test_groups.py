@@ -15,11 +15,33 @@ failure-safe cleanup. Both use a title unique to this test run.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 
 from tests.integration.helpers import run_cli
+
+
+def _run_cli_until(
+    predicate: Any, *args: str, attempts: int = 6, delay: float = 1.5, **kwargs: Any
+) -> Any:
+    """Retry a ``run_cli`` call until ``predicate(result)`` is true, or give up.
+
+    A read right after a mutation can briefly lag behind on the board's group
+    list (eventual consistency), so a read-after-delete residue check needs a
+    bounded poll rather than a single shot. Mirrors the ``_run_cli_until`` helper
+    in ``test_items.py`` (a local copy until FR-0013a's #69 consolidates it).
+    """
+    result: Any = None
+    for attempt in range(attempts):
+        result = run_cli(*args, **kwargs)
+        if predicate(result):
+            return result
+        if attempt < attempts - 1:
+            time.sleep(delay)
+    return result
 
 
 @pytest.mark.integration
@@ -88,7 +110,7 @@ def test_list_table_output_renders_without_error(
 
 
 @pytest.mark.integration
-def test_delete_removes_group_and_list_confirms_residue(test_board_id: str, run_id: str) -> None:
+def test_delete_removes_group_and_reports_deleted_true(test_board_id: str, run_id: str) -> None:
     title = f"{run_id}-delete-check"
 
     created = run_cli("groups", "create", "--title", title, "--board-id", test_board_id)
@@ -108,11 +130,23 @@ def test_delete_removes_group_and_list_confirms_residue(test_board_id: str, run_
         assert isinstance(delete_data, dict)
         assert delete_data.get("group_id")
         assert delete_data.get("title") == title
-        # Note: Monday's `delete_group` mutation reports `deleted: false` on
-        # this account/board even when the group is genuinely removed, so the
-        # residue check below (not this flag) is the authoritative signal.
+        # FR-0014: `deleted` is now a trustworthy branch signal -- the command
+        # verifies a genuine removal rather than forwarding Monday's stale
+        # synchronous `delete_group.deleted` flag (which returns false on this
+        # account even when the group is really gone).
+        assert delete_data.get("deleted") is True
 
-        list_data = run_cli("groups", "list", "--board-id", test_board_id)
+        # And the group is genuinely absent. Bounded poll: a read right after
+        # delete can briefly lag on eventual consistency, so retry rather than
+        # assert on a single shot (race-free residue confirmation).
+        list_data = _run_cli_until(
+            lambda d: isinstance(d, dict)
+            and title not in {g.get("title") for g in d.get("groups", [])},
+            "groups",
+            "list",
+            "--board-id",
+            test_board_id,
+        )
         remaining_titles = {g.get("title") for g in list_data.get("groups", [])}
         assert title not in remaining_titles
     finally:

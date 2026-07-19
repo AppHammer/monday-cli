@@ -158,11 +158,15 @@ def test_update_status_round_trips_via_get(created_item: Callable[..., str]) -> 
         ("items", "get", "--item-id", item_id),
         attempts=12,
         delay=2.0,
-        expect_error=True,
+        # No expect_error=True: items get by ID is strongly consistent; a genuine
+        # "Item not found" should fail fast (raises AssertionError via run_cli),
+        # not burn 12 retries returning a raw string.  Rate-limit exits (429 →
+        # exit 1) are also AssertionError and are retried by poll_until's
+        # except AssertionError handler — expect_error=True is not needed.
     )
     assert isinstance(fetched, dict), (
         f"items get never returned a parseable JSON dict for item {item_id} "
-        f"after 12 attempts -- item may be rate-limited or unreachable"
+        f"after 12 attempts (24s) -- possible rate-limit or API issue"
     )
     matches = [cv for cv in fetched["column_values"] if cv.get("id") == column_id]
     assert len(matches) == 1

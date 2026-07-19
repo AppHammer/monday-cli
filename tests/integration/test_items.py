@@ -168,7 +168,20 @@ def test_list_pagination_contract_and_all_pages(
     assert page_2["items_count"] == 1
     assert page_2["items"][0]["id"] != page_1["items"][0]["id"]
 
-    all_data = run_cli("items", "list", "--board-id", test_board_id, "--all", "--limit", "500")
+    # Bounded poll: both items were just created, and an `--all` read can
+    # briefly lag behind on the board's items_page (eventual consistency),
+    # so retry until both are visible rather than asserting on one shot.
+    all_data = _run_cli_until(
+        lambda d: isinstance(d, dict)
+        and {first_id, second_id} <= {str(item["id"]) for item in d.get("items", [])},
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "--all",
+        "--limit",
+        "500",
+    )
 
     assert isinstance(all_data, dict)
     assert "items" in all_data
@@ -190,7 +203,11 @@ def test_group_filtering_returns_only_matching_group(
     item_a = created_item("in-group-a", group_id=group_a)
     created_item("in-group-b", group_id=group_b)
 
-    data = run_cli(
+    # Bounded poll: item_a was just created into group_a, and a group-filtered
+    # `--all` read can briefly lag behind on eventual consistency, so retry
+    # until it's visible rather than asserting on one shot.
+    data = _run_cli_until(
+        lambda d: isinstance(d, dict) and any(str(i["id"]) == item_a for i in d.get("items", [])),
         "items",
         "list",
         "--board-id",
@@ -222,8 +239,14 @@ def test_g_by_id_equals_group_id_and_title_path(
 
     common = ["items", "list", "--board-id", test_board_id, "--all", "--limit", "500"]
 
-    by_group_id = run_cli(*common, "--group-id", group_a)
-    by_g_id = run_cli(*common, "-g", group_a)
+    # Bounded poll: item_a was just created into group_a, and a group-filtered
+    # `--all` read can briefly lag behind on eventual consistency, so retry
+    # until it's visible rather than asserting on one shot.
+    def _has_item_a(d: Any) -> bool:
+        return isinstance(d, dict) and any(str(i["id"]) == item_a for i in d.get("items", []))
+
+    by_group_id = _run_cli_until(_has_item_a, *common, "--group-id", group_a)
+    by_g_id = _run_cli_until(_has_item_a, *common, "-g", group_a)
 
     ids_group_id = sorted(str(i["id"]) for i in by_group_id["items"])
     ids_g_id = sorted(str(i["id"]) for i in by_g_id["items"])
@@ -231,7 +254,7 @@ def test_g_by_id_equals_group_id_and_title_path(
 
     # Title path resolves to the same group.
     title_a = run_cli("items", "get", "--item-id", item_a)["group"]["title"]
-    by_g_title = run_cli(*common, "-g", title_a)
+    by_g_title = _run_cli_until(_has_item_a, *common, "-g", title_a)
     assert sorted(str(i["id"]) for i in by_g_title["items"]) == [item_a]
 
 
@@ -318,7 +341,19 @@ def test_delete_removes_item_and_list_confirms_removal(
     # distinguishable from an unknown group after FR-0009 Epic B). This is a
     # clean, silent empty result -- no human-readable "not found" message is
     # printed for a valid-but-empty group (only an unknown one is an error).
-    list_data = run_cli("items", "list", "--board-id", test_board_id, "--group-id", group_id)
+    #
+    # Bounded poll: a read right after delete can briefly lag on eventual
+    # consistency -- the deleted item can still appear on the board's
+    # items_page for a moment -- so retry rather than assert on one shot.
+    list_data = _run_cli_until(
+        lambda d: isinstance(d, dict) and d.get("items") == [],
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "--group-id",
+        group_id,
+    )
     assert isinstance(list_data, dict)
     assert list_data.get("items") == []
     assert list_data.get("items_count") == 0

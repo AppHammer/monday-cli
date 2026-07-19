@@ -47,10 +47,15 @@ class FakeGroupsClient:
         groups_before: list[dict[str, Any]],
         delete_response: Any,
         groups_after: list[dict[str, Any]] | None = None,
+        verify_boards_empty: bool = False,
     ) -> None:
         self.groups_before = groups_before
         self.delete_response = delete_response
         self.groups_after = groups_after if groups_after is not None else []
+        # When True, every post-delete verification re-query comes back with an
+        # empty `boards` list -- simulating a transient read failure rather than
+        # a confirmed absence of the group.
+        self.verify_boards_empty = verify_boards_empty
         self.group_query_count = 0
         self.delete_calls = 0
 
@@ -62,6 +67,8 @@ class FakeGroupsClient:
             return self.delete_response
         if "groups {" in query:
             self.group_query_count += 1
+            if self.group_query_count > 1 and self.verify_boards_empty:
+                return {"boards": []}
             groups = self.groups_before if self.group_query_count == 1 else self.groups_after
             return {"boards": [{"id": "1", "name": "Test Board", "groups": groups}]}
         raise AssertionError(f"Unexpected query dispatched:\n{query[:120]}")
@@ -172,6 +179,29 @@ def test_still_present_reports_deleted_false_and_nonzero_exit(use_client: Any) -
     assert data["deleted"] is False
     assert data["group_id"] == "123"
     assert "still present" in result.stderr.lower()
+
+
+def test_unreadable_verify_boards_not_concluded_deleted(use_client: Any) -> None:
+    """A failed verification read (empty `boards`) must not read as "deleted".
+
+    If the post-delete re-query can't even read the board back (e.g. a
+    transient API hiccup), that is a failed verification, not evidence the
+    group is gone -- it must not be treated as a false-positive "deleted: true".
+    """
+    use_client(
+        FakeGroupsClient(
+            groups_before=[_group()],
+            delete_response={"delete_group": {"id": "123", "deleted": False}},
+            verify_boards_empty=True,
+        )
+    )
+
+    result = _delete()
+
+    assert result.exit_code != 0
+    data = json.loads(result.stdout)
+    assert data["deleted"] is False
+    assert data["group_id"] == "123"
 
 
 def test_null_delete_group_result_errors_nonzero(use_client: Any) -> None:

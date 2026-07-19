@@ -27,12 +27,15 @@ def _verify_group_deleted(
     """Confirm a group is absent from its board, tolerating read-after-delete lag.
 
     Re-queries ``GET_BOARD_GROUPS`` up to ``attempts`` times, returning ``True``
-    as soon as the group no longer appears -- a genuine deletion, even when
-    Monday's synchronous ``delete_group.deleted`` field reported ``false`` (an
-    eventual-consistency artifact this command must not trust). Returns
-    ``False`` only if the group remains present across *every* attempt, i.e. the
-    mutation was accepted but the group is genuinely still there rather than the
-    read merely lagging.
+    as soon as the board is actually returned and the group no longer appears
+    among its groups -- a genuine deletion, even when Monday's synchronous
+    ``delete_group.deleted`` field reported ``false`` (an eventual-consistency
+    artifact this command must not trust). Returns ``False`` if the group
+    remains present across *every* attempt, i.e. the mutation was accepted but
+    the group is genuinely still there rather than the read merely lagging --
+    and also ``False`` if the board itself could never be read (an empty or
+    missing ``boards`` response is a failed read, not evidence of deletion, so
+    it must never be treated as "verified deleted").
     """
     for attempt in range(attempts):
         verify_result = client.execute_query(
@@ -40,9 +43,10 @@ def _verify_group_deleted(
             {"boardIds": [str(board_id)]},
         )
         verify_boards = verify_result.get("boards", [])
-        groups = verify_boards[0].get("groups", []) if verify_boards else []
-        if not any(g.get("id") == group_id for g in groups):
-            return True
+        if verify_boards:
+            groups = verify_boards[0].get("groups", [])
+            if not any(g.get("id") == group_id for g in groups):
+                return True
         if attempt < attempts - 1:
             time.sleep(delay)
     return False

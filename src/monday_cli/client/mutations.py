@@ -163,11 +163,14 @@ mutation DeleteItem($itemId: ID!) {
 }
 """
 
-# Clear a column value (used to detach a corrupted / dangling doc reference)
-CLEAR_ITEM_COLUMN_VALUE = """
-mutation ClearItemColumnValue($boardId: ID!, $itemId: ID!, $columnId: String!) {
-  clear_item_column_value(board_id: $boardId, item_id: $itemId, column_id: $columnId) {
+# Reset a doc column value to empty (used to detach a corrupted / dangling doc reference).
+# Monday's clear_item_column_value mutation was removed from the API; the current
+# equivalent for doc columns is change_column_value with value '{"files":[]}'.
+RESET_DOC_COLUMN_VALUE = """
+mutation ResetDocColumnValue($boardId: ID!, $itemId: ID!, $columnId: String!, $value: JSON!) {
+  change_column_value(board_id: $boardId, item_id: $itemId, column_id: $columnId, value: $value) {
     id
+    name
   }
 }
 """

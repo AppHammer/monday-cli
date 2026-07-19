@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import time
 from typing import Any
 
 import typer
@@ -10,10 +11,10 @@ from monday_cli.cli import docs_app, get_client
 from monday_cli.client.graphql_client import MondayGraphQLClient
 from monday_cli.client.mutations import (
     ADD_CONTENT_FROM_MARKDOWN,
-    CLEAR_ITEM_COLUMN_VALUE,
     CREATE_DOC,
     DELETE_DOC,
     DELETE_DOC_BLOCK,
+    RESET_DOC_COLUMN_VALUE,
 )
 from monday_cli.client.queries import (
     EXPORT_MARKDOWN_FROM_DOC,
@@ -26,6 +27,8 @@ from monday_cli.constants import (
     DOC_CHUNK_MAX_BYTES,
     DOC_CLEAR_MAX_ITERATIONS,
     DOC_CLEAR_MAX_TOTAL_DELETES,
+    DOC_CREATE_RETRY_ATTEMPTS,
+    DOC_CREATE_RETRY_DELAY,
     DOC_SCAN_MAX_PAGES,
     DOC_WRITE_TIMEOUT,
 )
@@ -364,6 +367,54 @@ def _doc_has_dedup_key(client: MondayGraphQLClient, internal_id: str, key: str) 
     return False
 
 
+def _create_doc_with_retry(
+    client: MondayGraphQLClient,
+    item_id: int,
+    column_id: str,
+) -> dict[str, Any]:
+    """Create a doc in a column with bounded retry for eventual-consistency transients.
+
+    Monday's API can briefly return "Item not found" for an item immediately after
+    creation (BUG-2/FR-0015). This helper retries CREATE_DOC up to
+    DOC_CREATE_RETRY_ATTEMPTS times on that specific transient error, backing off
+    by DOC_CREATE_RETRY_DELAY seconds between each attempt.
+
+    CRITICAL safety guarantee: retries occur ONLY when CREATE_DOC returned an
+    error containing "Item not found" — never after a partial success or any other
+    error. This prevents any risk of double-creating the doc.
+
+    Returns:
+        The dict from the create_doc response key (contains at least {"id": "..."}).
+
+    Raises:
+        MondayAPIError: if all attempts are exhausted or a non-transient error occurs.
+    """
+    last_err: MondayAPIError | None = None
+    for attempt in range(DOC_CREATE_RETRY_ATTEMPTS):
+        try:
+            result = client.execute_mutation(
+                CREATE_DOC,
+                {"itemId": str(item_id), "columnId": column_id},
+            )
+            created: dict[str, Any] | None = result.get("create_doc")
+            if created:
+                return created
+            raise MondayAPIError("create_doc returned no result")
+        except MondayAPIError as exc:
+            msg = str(exc).lower()
+            if "item not found" in msg or "itemnotfound" in msg:
+                last_err = exc
+                if attempt < DOC_CREATE_RETRY_ATTEMPTS - 1:
+                    time.sleep(DOC_CREATE_RETRY_DELAY)
+                continue
+            raise  # non-transient error — propagate immediately
+
+    raise MondayAPIError(
+        f"Failed to create doc after {DOC_CREATE_RETRY_ATTEMPTS} attempts "
+        f"(item {item_id} not yet visible to the docs API): {last_err}"
+    )
+
+
 @docs_app.command("get")
 def get_doc(
     item_id: int | None = typer.Option(
@@ -551,13 +602,14 @@ def append_doc(
         created = False
 
         if not object_id:
-            create_result = client.execute_mutation(
-                CREATE_DOC,
-                {"itemId": str(item_id), "columnId": column_id},
-            )
-            created_doc = create_result.get("create_doc")
-            if not created_doc:
-                secho_err("Error: Failed to create document", fg=typer.colors.RED)
+            # BUG-2 fix (FR-0015): CREATE_DOC may transiently fail with "Item not
+            # found" for freshly-created items due to Monday's eventual consistency.
+            # Use the bounded-retry helper so the first append after item creation
+            # does not fail non-deterministically.
+            try:
+                created_doc = _create_doc_with_retry(client, item_id, column_id)
+            except MondayAPIError as exc:
+                secho_err(f"Error: Failed to create document — {exc}", fg=typer.colors.RED)
                 raise typer.Exit(1)
             internal_id = created_doc["id"]
             created = True
@@ -680,13 +732,14 @@ def put_doc(
 
         if not object_id:
             # Fresh cell: create the doc object first.
-            create_result = client.execute_mutation(
-                CREATE_DOC,
-                {"itemId": str(item_id), "columnId": column_id},
-            )
-            created_doc = create_result.get("create_doc")
-            if not created_doc:
-                secho_err("Error: Failed to create document", fg=typer.colors.RED)
+            # BUG-2 fix (FR-0015): CREATE_DOC may transiently fail with "Item not
+            # found" for freshly-created items due to Monday's eventual consistency.
+            # Use the bounded-retry helper so a put immediately after item creation
+            # does not fail non-deterministically.
+            try:
+                created_doc = _create_doc_with_retry(client, item_id, column_id)
+            except MondayAPIError as exc:
+                secho_err(f"Error: Failed to create document — {exc}", fg=typer.colors.RED)
                 raise typer.Exit(1)
             internal_id = created_doc["id"]
             created = True
@@ -850,8 +903,9 @@ def clear_doc(
         else:
             # US-0005-05: Corrupted / unresolvable path — the doc object_id exists in
             # the column value but the docs API can no longer resolve it (BUG-1 orphan
-            # state). Use clear_item_column_value to detach the dangling reference so
-            # the column becomes writable again.
+            # state). The former clear_item_column_value mutation was removed from
+            # Monday's API. Use change_column_value with {"files": []} — the current
+            # equivalent — to detach the dangling reference so the column is writable.
             if not board_id:
                 secho_err(
                     "Error: Cannot recover corrupted cell — board ID unavailable.",
@@ -865,11 +919,12 @@ def clear_doc(
                 fg=typer.colors.YELLOW,
             )
             client.execute_mutation(
-                CLEAR_ITEM_COLUMN_VALUE,
+                RESET_DOC_COLUMN_VALUE,
                 {
                     "boardId": str(board_id),
                     "itemId": str(item_id),
                     "columnId": column_id,
+                    "value": json.dumps({"files": []}),
                 },
             )
             secho_err(

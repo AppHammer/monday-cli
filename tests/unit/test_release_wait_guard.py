@@ -23,6 +23,7 @@ edits to release.yml (the FRD's cited line numbers are already stale).
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml"
@@ -41,7 +42,7 @@ def _wait_step_run() -> str:
         for step in job.get("steps", []):
             if step.get("name") == WAIT_STEP_NAME:
                 return str(step["run"])
-    raise AssertionError(f"'{WAIT_STEP_NAME}' step not found in {WORKFLOW}")
+    pytest.fail(f"'{WAIT_STEP_NAME}' step not found in {WORKFLOW}")
 
 
 def test_wait_step_exists() -> None:
@@ -64,6 +65,16 @@ def test_wait_step_has_no_substring_found_match() -> None:
 
     ``"not_found"`` contains the substring ``"found"``, so `grep -q "found"`
     matches on iteration 1 and the loop breaks without ever waiting.
+
+    These NEGATIVE checks (absence of the exact ``grep -q "found"`` /
+    ``echo "not_found"`` strings) are complementary to the POSITIVE check in
+    ``test_wait_step_polls_by_exit_code`` (the exit-code idiom must be
+    present).  The positive test is what catches any wholesale rewrite of the
+    wait step; the negative tests here catch targeted reintroductions of the
+    FR-0017 regression signature.  Future maintainers must not remove either
+    side: removing the positive test would allow a rewrite to drop the
+    exit-code poll silently; removing these negative tests would allow the
+    exact bug string to sneak back in under an otherwise-passing positive.
     """
     run = _wait_step_run()
     assert 'grep -q "found"' not in run, (
@@ -90,7 +101,7 @@ def test_wait_step_still_fails_loudly() -> None:
     )
     # The final check must be a `gh release view` whose failure path exits 1
     # (via `|| { ... exit 1 }`), i.e. it is not merely the polling call.
-    assert re.search(r"gh release view[^\n]*\n\s*\|\|", run) or "|| {" in run, (
+    assert re.search(r"gh release view[^\n]*\|\|\s*\{", run), (
         "FR-0017: expected a final `gh release view` guarded by a `|| { ... "
         "exit 1 }` failure block after the poll loop."
     )

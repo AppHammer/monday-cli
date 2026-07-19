@@ -994,7 +994,7 @@ def delete_subitem(
                 fg=typer.colors.YELLOW,
             )
             secho_err("This action cannot be undone.", fg=typer.colors.RED)
-            confirm_delete = typer.confirm("Are you sure you want to continue?")
+            confirm_delete = typer.confirm("Are you sure you want to continue?", err=True)
             if not confirm_delete:
                 secho_err("Delete cancelled.", fg=typer.colors.BLUE)
                 raise typer.Exit(0)

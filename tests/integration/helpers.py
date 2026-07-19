@@ -8,7 +8,7 @@ it to exec the packaged binary instead, via subprocess, so CI can optionally
 validate the standalone build exercises the same contract.
 
 FR-0008 harness upgrade: ``run_cli`` now captures stderr separately (via
-``mix_stderr=False`` for the in-process runner and ``completed.stderr`` for
+``result.stderr`` for the in-process runner and ``completed.stderr`` for
 the subprocess path). The strict-JSON mode is enforced by ``_extract_json``:
 it requires the **entire** stdout to parse as JSON — the old line-scanning
 fallback (which silently tolerated contamination) is removed.
@@ -26,9 +26,9 @@ from typer.testing import CliRunner
 
 from monday_cli.cli import app
 
-# mix_stderr=False is the FR-0008 key: CliRunner keeps stdout and stderr in
-# separate streams so tests can assert each independently.
-_runner = CliRunner(mix_stderr=False)
+# CliRunner already separates stdout and stderr by default in typer 0.27+ / click 8.4+;
+# result.stderr is populated independently of result.output so tests can assert each stream.
+_runner = CliRunner()
 
 
 class CliOutputError(AssertionError):

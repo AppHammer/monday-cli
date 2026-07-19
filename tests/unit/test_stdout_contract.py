@@ -19,6 +19,9 @@ Contract enforced (FR-0008 AC-8):
     is the designated stdout emitter) and nowhere in ``commands/*.py``.
   - ``secho_err(...)`` / ``eprint(...)`` from ``utils.output`` are the
     approved helpers and are not flagged.
+  - ``typer.confirm(...)`` without ``err=True`` is never allowed in
+    ``commands/*.py`` — the interactive prompt must go to stderr so stdout
+    stays clean JSON (FR-0008 contract).
 
 Exemptions (documented):
   - Calls inside an ``if table:`` branch (rich table output is human-only).
@@ -42,11 +45,14 @@ _COMMANDS_DIR = Path(__file__).parent.parent.parent / "src" / "monday_cli" / "co
 
 
 def _is_in_flag_branch(node: ast.AST, tree: ast.AST, flag_names: set[str]) -> bool:
-    """Return True if *node* is a direct descendant of an ``if <flag>:`` test.
+    """Return True if *node* is a descendant of an ``if <flag>:`` test.
 
-    Walks up the tree looking for an enclosing ``ast.If`` whose test is one of
-    the flag names (e.g. ``table``, ``raw``).  Only one level of enclosing If
-    is checked for simplicity; nested branches are still flagged.
+    Walks up the parent chain looking for any enclosing ``ast.If`` whose test
+    is a bare name from *flag_names* (e.g. ``table``, ``raw``).  The walk
+    handles arbitrary nesting depth.  The one case it does NOT cover is a
+    compound condition such as ``if table and x:``, where the test node is a
+    ``BoolOp`` rather than a bare ``Name`` — such guards are treated as
+    non-matching and the enclosed call is still flagged.
     """
     # Build a child-to-parent mapping for the whole tree
     parents: dict[int, ast.AST] = {}
@@ -118,6 +124,23 @@ def _find_stdout_violations(source: str, filepath: str) -> list[str]:
                         " outside table/raw branch"
                     )
 
+        # --- typer.confirm(...) without err=True ---
+        elif (
+            isinstance(func, ast.Attribute)
+            and func.attr == "confirm"
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "typer"
+        ):
+            has_err_true = any(
+                kw.arg == "err" and isinstance(kw.value, ast.Constant) and kw.value.value is True
+                for kw in node.keywords
+            )
+            if not has_err_true:
+                violations.append(
+                    f"line {node.lineno}: typer.confirm() without err=True"
+                    " (interactive prompt must go to stderr to keep stdout clean)"
+                )
+
         # --- bare print(...) ---
         elif isinstance(func, ast.Name) and func.id == "print":
             if not _is_in_flag_branch(node, tree, {"table", "raw"}):
@@ -151,7 +174,9 @@ def test_no_stdout_contamination_in_default_mode(module_path: Path) -> None:
     """FR-0008 AC-8: command module must not write prose to stdout in default mode.
 
     Any ``typer.secho`` / ``typer.echo`` / bare ``print`` call found OUTSIDE
-    a ``--table`` or ``--raw`` branch is a contract violation.
+    a ``--table`` or ``--raw`` branch is a contract violation.  Additionally,
+    any ``typer.confirm()`` call without ``err=True`` is a violation — the
+    interactive prompt must go to stderr to keep stdout clean.
     """
     source = module_path.read_text(encoding="utf-8")
     violations = _find_stdout_violations(source, str(module_path))
@@ -162,6 +187,7 @@ def test_no_stdout_contamination_in_default_mode(module_path: Path) -> None:
             f" (FR-0008 contract violation):\n{detail}\n\n"
             "Fix: replace typer.secho/echo with secho_err() from monday_cli.utils.output,"
             " or add err=True, or ensure the call is inside an `if table:` / `if raw:` block."
+            " For typer.confirm(), add err=True so the prompt goes to stderr."
         )
 
 

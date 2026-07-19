@@ -797,7 +797,8 @@ def clear_doc(
 
         if not force:
             confirm = typer.confirm(
-                f"Clear doc column '{column_name}' on item {item_id}? This cannot be undone."
+                f"Clear doc column '{column_name}' on item {item_id}? This cannot be undone.",
+                err=True,
             )
             if not confirm:
                 secho_err("Aborted.", fg=typer.colors.YELLOW)

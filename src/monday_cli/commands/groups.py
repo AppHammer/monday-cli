@@ -261,7 +261,7 @@ def delete_group(
                 f"WARNING: This will delete group '{group_title}' and all its items!",
                 fg=typer.colors.YELLOW,
             )
-            confirm_delete = typer.confirm("Are you sure you want to continue?")
+            confirm_delete = typer.confirm("Are you sure you want to continue?", err=True)
             if not confirm_delete:
                 secho_err("Delete cancelled.", fg=typer.colors.BLUE)
                 raise typer.Exit(0)

@@ -321,3 +321,143 @@ def test_items_list_all_empty_group_returns_valid_json(
     assert data.get("items") == []
     assert data.get("total_items") == 0
     assert data.get("pages_fetched") is not None
+
+
+# ---------------------------------------------------------------------------
+# AC-3 (additional): subitems list, subitems get, items update, docs get
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_subitems_list_stdout_is_clean_json(
+    created_item: Callable[..., str],
+    created_subitem: Callable[..., str],
+) -> None:
+    """AC-3: subitems list -- stdout is clean JSON, success message on stderr."""
+    _skip_if_no_token()
+    parent_id = created_item("ac3-sub-list-parent")
+    created_subitem(parent_id, "sub-a")
+    created_subitem(parent_id, "sub-b")
+
+    stdout, stderr, exit_code = run_cli_streams("subitems", "list", "--item-id", parent_id)
+
+    assert exit_code == 0, f"stdout: {stdout}\nstderr: {stderr}"
+    _assert_clean_stdout(stdout, "subitems list")
+    data = json.loads(stdout.strip())
+    assert "subitems" in data
+    assert len(data["subitems"]) >= 2
+    # No prose on stdout
+    assert "subitems" not in stdout.lower().split("{")[0]
+
+
+@pytest.mark.integration
+def test_subitems_get_stdout_is_clean_json(
+    created_item: Callable[..., str],
+    created_subitem: Callable[..., str],
+) -> None:
+    """AC-3: subitems get -- stdout is clean JSON."""
+    _skip_if_no_token()
+    parent_id = created_item("ac3-sub-get-parent")
+    subitem_id = created_subitem(parent_id, "sub-get")
+
+    stdout, stderr, exit_code = run_cli_streams("subitems", "get", "--subitem-id", subitem_id)
+
+    assert exit_code == 0, f"stdout: {stdout}\nstderr: {stderr}"
+    _assert_clean_stdout(stdout, "subitems get")
+    data = json.loads(stdout.strip())
+    assert data.get("id") == subitem_id
+
+
+@pytest.mark.integration
+def test_items_update_stdout_is_clean_json(created_item: Callable[..., str]) -> None:
+    """AC-3: items update -- stdout is clean JSON (no success message on stdout)."""
+    _skip_if_no_token()
+    item_id = created_item("ac3-update-col")
+
+    # Discover a real status column with at least one label, then update it.
+    # Fall back to skipping if the test board has no usable status column.
+    columns_data = run_cli("items", "list-columns", "--item-id", item_id)
+    columns = columns_data.get("columns", [])
+    status_columns = [
+        col for col in columns if col.get("type") == "status" and col.get("status_options")
+    ]
+    if not status_columns:
+        pytest.skip("No status column with options found on the test board")
+
+    status_col = status_columns[0]
+    labels = [opt["label"] for opt in status_col["status_options"] if opt.get("label", "").strip()]
+    if not labels:
+        pytest.skip(f"Status column '{status_col['title']}' has no non-blank labels")
+
+    column_title = status_col["title"]
+    target_label = labels[0]
+
+    stdout, stderr, exit_code = run_cli_streams(
+        "items",
+        "update",
+        "--item-id",
+        item_id,
+        "--title",
+        column_title,
+        "--value",
+        target_label,
+    )
+
+    assert exit_code == 0, f"stdout: {stdout}\nstderr: {stderr}"
+    _assert_clean_stdout(stdout, "items update")
+    data = json.loads(stdout.strip())
+    assert data.get("id")
+    # Success message must be on stderr, not stdout
+    assert "✓" not in stdout
+    assert "✓" in stderr or "updated" in stderr.lower()
+
+
+@pytest.mark.integration
+def test_docs_get_stdout_is_clean_json(created_item: Callable[..., str]) -> None:
+    """AC-3: docs get (JSON default path) -- stdout is clean JSON, not raw Markdown.
+
+    Seeds the doc column with content first via ``docs append`` so the command
+    has a populated document to fetch (a brand-new doc column is empty and
+    ``docs get`` exits 1 with no content).  The contract check covers the
+    happy path (exit 0 + clean JSON).
+    """
+    _skip_if_no_token()
+    item_id = created_item("ac3-doc-get")
+
+    # Discover the doc column on the test board
+    columns_data = run_cli("items", "list-columns", "--item-id", item_id)
+    columns = columns_data.get("columns", [])
+    doc_columns = [col for col in columns if col.get("type") == "doc"]
+    if not doc_columns:
+        pytest.skip(
+            "Test board 18422673411 has no doc-type column; add one and re-run. "
+            f"(Run `monday items list-columns --item-id {item_id}` to verify.)"
+        )
+
+    doc_column_name = doc_columns[0]["title"]
+
+    # Seed the doc with content so docs get has something to return
+    run_cli(
+        "docs",
+        "append",
+        "--item-id",
+        item_id,
+        "--column-name",
+        doc_column_name,
+        "--content",
+        "FR-0008 contract test",
+    )
+
+    # docs get WITHOUT --raw should produce clean JSON on stdout
+    stdout, stderr, exit_code = run_cli_streams(
+        "docs", "get", "--item-id", item_id, "--column-name", doc_column_name
+    )
+
+    assert exit_code == 0, f"stdout: {stdout}\nstderr: {stderr}"
+    _assert_clean_stdout(stdout, "docs get (JSON)")
+    data = json.loads(stdout.strip())
+    # The JSON default path always returns {markdown, blocks}
+    assert "blocks" in data
+    assert isinstance(data["blocks"], list)
+    # No raw Markdown prose should be in stdout — it must be JSON-encoded
+    assert "FR-0008" not in stdout or stdout.strip().startswith("{")

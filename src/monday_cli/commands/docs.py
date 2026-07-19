@@ -11,10 +11,10 @@ from monday_cli.cli import docs_app, get_client
 from monday_cli.client.graphql_client import MondayGraphQLClient
 from monday_cli.client.mutations import (
     ADD_CONTENT_FROM_MARKDOWN,
+    CHANGE_COLUMN_VALUE,
     CREATE_DOC,
     DELETE_DOC,
     DELETE_DOC_BLOCK,
-    RESET_DOC_COLUMN_VALUE,
 )
 from monday_cli.client.queries import (
     EXPORT_MARKDOWN_FROM_DOC,
@@ -410,7 +410,7 @@ def _create_doc_with_retry(
             raise  # non-transient error — propagate immediately
 
     raise MondayAPIError(
-        f"Failed to create doc after {DOC_CREATE_RETRY_ATTEMPTS} attempts "
+        f"Failed to create doc after {DOC_CREATE_RETRY_ATTEMPTS} total attempts "
         f"(item {item_id} not yet visible to the docs API): {last_err}"
     )
 
@@ -919,7 +919,7 @@ def clear_doc(
                 fg=typer.colors.YELLOW,
             )
             client.execute_mutation(
-                RESET_DOC_COLUMN_VALUE,
+                CHANGE_COLUMN_VALUE,
                 {
                     "boardId": str(board_id),
                     "itemId": str(item_id),

@@ -630,11 +630,13 @@ class TestDocsClearCommand:
         assert data["blocks_deleted"] == 3
         assert data["doc_id"] == "77"
 
-    def test_clear_corrupted_doc_calls_reset_doc_column_value(self) -> None:
-        """Corrupted / orphaned path: cannot resolve internal_id → calls RESET_DOC_COLUMN_VALUE.
+    def test_clear_corrupted_doc_calls_change_column_value(self) -> None:
+        """Corrupted / orphaned path: cannot resolve internal_id → calls CHANGE_COLUMN_VALUE.
 
         BUG-1 fix (FR-0015): clear_item_column_value was removed from Monday's API.
         The replacement is change_column_value with value='{"files":[]}'.
+        RESET_DOC_COLUMN_VALUE was a duplicate of CHANGE_COLUMN_VALUE; the code now
+        uses CHANGE_COLUMN_VALUE directly.
         """
         import json as _json
 
@@ -654,12 +656,12 @@ class TestDocsClearCommand:
 
         assert result.exit_code == 0
         assert client.execute_mutation.call_count == 1
-        # The mutation must be RESET_DOC_COLUMN_VALUE (wraps change_column_value)
+        # The mutation must be CHANGE_COLUMN_VALUE (the canonical mutation, not a duplicate)
         mutation_call = client.execute_mutation.call_args_list[0]
         args, kwargs = mutation_call
-        from monday_cli.client.mutations import RESET_DOC_COLUMN_VALUE
+        from monday_cli.client.mutations import CHANGE_COLUMN_VALUE
 
-        assert args[0] == RESET_DOC_COLUMN_VALUE
+        assert args[0] == CHANGE_COLUMN_VALUE
         # The value variable must be '{"files":[]}' — the reset payload
         variables = args[1]
         assert _json.loads(variables["value"]) == {"files": []}
@@ -861,7 +863,13 @@ class TestCreateDocWithRetry:
         mock_time.sleep.assert_called_once()  # one backoff sleep between attempts
 
     def test_raises_after_all_retries_exhausted(self) -> None:
-        """After DOC_CREATE_RETRY_ATTEMPTS failures, MondayAPIError is raised."""
+        """After DOC_CREATE_RETRY_ATTEMPTS failures, MondayAPIError is raised.
+
+        With 4 total attempts (DOC_CREATE_RETRY_ATTEMPTS=4), sleep is called between
+        consecutive attempts, guarded by `attempt < DOC_CREATE_RETRY_ATTEMPTS - 1`.
+        That means sleep is called for attempts 0, 1, 2 (not after the final attempt 3),
+        yielding exactly 3 sleep calls.
+        """
         import pytest
 
         from monday_cli.commands.docs import _create_doc_with_retry
@@ -877,6 +885,9 @@ class TestCreateDocWithRetry:
                 _create_doc_with_retry(client, 1001, "col1")
 
         assert client.execute_mutation.call_count == DOC_CREATE_RETRY_ATTEMPTS
+        # Sleep is called between attempts, not after the last one:
+        # attempts 0...(N-2) each sleep → DOC_CREATE_RETRY_ATTEMPTS - 1 calls
+        assert mock_time.sleep.call_count == DOC_CREATE_RETRY_ATTEMPTS - 1
 
     def test_non_transient_error_propagates_immediately(self) -> None:
         """A non-transient MondayAPIError must NOT be retried."""
@@ -942,3 +953,56 @@ class TestCreateDocWithRetry:
         assert data["doc_id"] == "88"
         # CREATE_DOC called twice (retry), then ADD_CONTENT_FROM_MARKDOWN once
         assert client.execute_mutation.call_count == 3
+
+    def test_append_retries_create_doc_on_item_not_found(self) -> None:
+        """docs append must retry CREATE_DOC when first attempt gets 'Item not found'.
+
+        This mirrors test_put_retries_create_doc_on_item_not_found but exercises the
+        append_doc code path, which received the same bounded-retry fix (FR-0015 BUG-2).
+        """
+        from monday_cli.utils.error_handler import MondayAPIError
+
+        item_no_doc = {
+            "items": [
+                {
+                    "id": "1001",
+                    "name": "Item",
+                    "board": {"id": "999", "name": "Board"},
+                    "column_values": [{"id": "col1", "text": "", "value": None, "type": "doc"}],
+                }
+            ]
+        }
+        client = MagicMock()
+        client.execute_query.side_effect = [item_no_doc, _make_board_columns()]
+        # First CREATE_DOC fails with transient error; second succeeds.
+        # After creation, ADD_CONTENT_FROM_MARKDOWN is called for the sentinel + content.
+        client.execute_mutation.side_effect = [
+            MondayAPIError("GraphQL errors: Item not found"),
+            {"create_doc": {"id": "88"}},
+            {"add_content_to_doc_from_markdown": {"success": True, "block_ids": ["b1"]}},
+        ]
+
+        with patch("monday_cli.commands.docs.get_client", return_value=client):
+            with patch("monday_cli.commands.docs.time") as mock_time:
+                mock_time.sleep = MagicMock()
+                result = runner.invoke(
+                    app,
+                    [
+                        "docs",
+                        "append",
+                        "--item-id",
+                        "1001",
+                        "--column-name",
+                        "Notes",
+                        "--content",
+                        "# Hello",
+                    ],
+                )
+
+        assert result.exit_code == 0, result.stdout
+        data = _extract_json_from_output(result.stdout)
+        assert data["doc_id"] == "88"
+        # CREATE_DOC called twice (1 failure + 1 retry success), then ADD_CONTENT once
+        assert client.execute_mutation.call_count == 3
+        # One backoff sleep occurred between the two CREATE_DOC attempts
+        mock_time.sleep.assert_called_once()

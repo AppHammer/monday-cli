@@ -20,6 +20,7 @@ from monday_cli.constants import (
     DEFAULT_RETRY_MAX_ATTEMPTS,
     DEFAULT_RETRY_MAX_WAIT,
     DEFAULT_RETRY_MIN_WAIT,
+    RETRY_AFTER_BUFFER,
 )
 from monday_cli.utils.error_handler import NetworkError, RateLimitError
 
@@ -40,11 +41,17 @@ class _WaitRateLimitOrExponential(wait_base):
 
     def __init__(self, multiplier: float, min_wait: float, max_wait: float) -> None:
         self._exp = wait_exponential(multiplier=multiplier, min=min_wait, max=max_wait)
-        self._retry_after_buffer = 2.0  # extra seconds on top of Retry-After
+        # Shared with the harness helper (_parse_retry_after) via RETRY_AFTER_BUFFER
+        # so both always add the same safety margin on top of the server's value.
+        self._retry_after_buffer = RETRY_AFTER_BUFFER
 
     def __call__(self, retry_state: RetryCallState) -> float:
         exc = retry_state.outcome.exception() if retry_state.outcome else None
-        if isinstance(exc, RateLimitError) and exc.retry_after:
+        # Use `is not None` rather than truthiness so that an explicit
+        # Retry-After of 0 is honoured (a 0-second window still means the
+        # server acknowledged the reset; falling back to exponential would
+        # add unnecessary delay and ignore the server's intent).
+        if isinstance(exc, RateLimitError) and exc.retry_after is not None:
             wait = float(exc.retry_after) + self._retry_after_buffer
             logger.warning("Rate limit hit; honouring Retry-After, sleeping %.0fs", wait)
             return wait

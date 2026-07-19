@@ -46,6 +46,57 @@ def test_is_rate_limit_exit(exit_code: int, stderr: str, expected: bool) -> None
 
 
 # ---------------------------------------------------------------------------
+# _is_transient_server_error
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "stderr", "expected"),
+    [
+        # Monday GraphQL "Internal server error" (exact phrase from production)
+        (1, "GraphQL errors: Internal server error", True),
+        # Case-insensitive match
+        (1, "INTERNAL SERVER ERROR", True),
+        # 503 Service Unavailable
+        (1, "503 Service Unavailable", True),
+        (1, "Service unavailable", True),
+        (1, "temporarily unavailable", True),
+        # Non-transient errors must NOT be retried
+        (1, "Error: Item not found", False),
+        (1, "Error: Invalid API token", False),
+        (1, "GraphQL errors: Field 'foo' doesn't exist", False),
+        # Zero exit is never a transient error regardless of stderr
+        (0, "Internal server error", False),
+    ],
+)
+def test_is_transient_server_error(exit_code: int, stderr: str, expected: bool) -> None:
+    assert helpers._is_transient_server_error(exit_code, stderr) == expected
+
+
+def test_run_cli_retries_on_transient_server_error_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient server error on the first attempt must be retried; success returned."""
+    server_error = (1, "", "GraphQL errors: Internal server error", None)
+    success = (0, '{"id":"1"}', "", None)
+
+    fake = _make_invoke_sequence([server_error, success])
+    monkeypatch.setattr(helpers, "_invoke_in_process", fake)
+    monkeypatch.setattr(helpers, "_invoke_binary", fake)
+    monkeypatch.delenv("MONDAY_CLI_BIN", raising=False)
+    monkeypatch.setenv("MONDAY_IT_RATELIMIT_RETRIES", "3")
+    slept: list[float] = []
+    monkeypatch.setattr(helpers.time, "sleep", lambda s: slept.append(s))
+
+    result = helpers.run_cli("items", "get", "--item-id", "1")
+
+    assert result == {"id": "1"}
+    # Must have slept once with the transient backoff
+    assert len(slept) == 1
+    assert slept[0] == helpers._DEFAULT_TRANSIENT_BACKOFF
+
+
+# ---------------------------------------------------------------------------
 # _parse_retry_after
 # ---------------------------------------------------------------------------
 

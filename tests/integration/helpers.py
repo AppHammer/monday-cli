@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 import traceback
@@ -31,6 +32,82 @@ from monday_cli.cli import app
 # CliRunner already separates stdout and stderr by default in typer 0.27+ / click 8.4+;
 # result.stderr is populated independently of result.output so tests can assert each stream.
 _runner = CliRunner()
+
+# ---------------------------------------------------------------------------
+# Rate-limit detection (FR-0016)
+# ---------------------------------------------------------------------------
+# When the CLI exits non-zero due to a 429 / rate-limit, the error message
+# lands on stderr.  We detect that case by pattern-matching stderr so we can
+# retry the entire invocation instead of counting it as a test failure.
+
+_RATE_LIMIT_PATTERNS = re.compile(
+    r"rate.?limit|retry.?after|429|too many requests",
+    re.IGNORECASE,
+)
+
+# How many times run_cli will transparently retry a rate-limited invocation
+# before giving up and surfacing the failure.  Tunable via env var so CI can
+# increase headroom without touching code.
+_DEFAULT_RATELIMIT_RETRIES = 6
+_DEFAULT_RATELIMIT_BACKOFF = 65.0  # seconds — just over 1 full 60-s window
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read a positive int from the environment, falling back on any bad value."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read a non-negative float from the environment, falling back on any bad value."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return value if value >= 0 else default
+
+
+def _ratelimit_retries() -> int:
+    """Max transparent retries for a rate-limited CLI invocation.
+
+    Controlled by ``MONDAY_IT_RATELIMIT_RETRIES``.
+    """
+    return _env_int("MONDAY_IT_RATELIMIT_RETRIES", _DEFAULT_RATELIMIT_RETRIES)
+
+
+def _ratelimit_backoff() -> float:
+    """Base backoff (seconds) between rate-limit retries.
+
+    Controlled by ``MONDAY_IT_RATELIMIT_BACKOFF``.  We default to 65 s because
+    Monday's 429 ``Retry-After`` is typically 60 s; a small buffer helps.
+    """
+    return _env_float("MONDAY_IT_RATELIMIT_BACKOFF", _DEFAULT_RATELIMIT_BACKOFF)
+
+
+def _is_rate_limit_exit(exit_code: int, stderr: str) -> bool:
+    """Return True when a CLI invocation failed due to throttling."""
+    return exit_code != 0 and bool(_RATE_LIMIT_PATTERNS.search(stderr))
+
+
+def _parse_retry_after(stderr: str) -> float | None:
+    """Extract the Retry-After value (seconds) from a rate-limit stderr message.
+
+    Returns None when the value cannot be found; callers fall back to the
+    configured default backoff.
+    """
+    match = re.search(r"retry.?after\s+(\d+)\s*s", stderr, re.IGNORECASE)
+    if match:
+        return float(match.group(1)) + 2.0  # small buffer on top
+    return None
 
 
 class CliOutputError(AssertionError):
@@ -122,11 +199,33 @@ def run_cli(
         AssertionError: If ``expect_error`` is False and the CLI exits non-zero,
             or if JSON parsing is required but stdout is not clean JSON.
     """
+    # FR-0016: transparently retry the entire CLI invocation when Monday
+    # throttles us (429).  A throttled invocation is NOT a test failure — it is
+    # a transient infrastructure condition.  We retry up to
+    # _ratelimit_retries() times, sleeping for the Retry-After value that the
+    # CLI already extracted from the response header (visible in stderr) before
+    # falling through to the normal assertion path on the final attempt.
+    max_retries = _ratelimit_retries()
+    default_backoff = _ratelimit_backoff()
+
     binary = os.environ.get("MONDAY_CLI_BIN")
-    if binary:
-        exit_code, stdout, stderr, exception = _invoke_binary(binary, args)
-    else:
-        exit_code, stdout, stderr, exception = _invoke_in_process(args)
+    attempt = 0
+    while True:
+        if binary:
+            exit_code, stdout, stderr, exception = _invoke_binary(binary, args)
+        else:
+            exit_code, stdout, stderr, exception = _invoke_in_process(args)
+
+        # When expect_error=True the caller explicitly wants a non-zero exit, so
+        # we must NOT transparently retry — that would hide a real failure from
+        # the caller who is asserting against the error output.
+        if not expect_error and _is_rate_limit_exit(exit_code, stderr) and attempt < max_retries:
+            backoff = _parse_retry_after(stderr) or default_backoff
+            attempt += 1
+            time.sleep(backoff)
+            continue
+
+        break
 
     if not expect_error:
         exception_detail = f"\nException:{_format_exception(exception)}" if exception else ""
@@ -192,30 +291,6 @@ def run_cli_streams(*args: str, expect_error: bool = False) -> tuple[str, str, i
 
 _DEFAULT_POLL_ATTEMPTS = 6
 _DEFAULT_POLL_DELAY = 1.5
-
-
-def _env_int(name: str, default: int) -> int:
-    """Read a positive int from the environment, falling back on any bad value."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return default
-    return value if value > 0 else default
-
-
-def _env_float(name: str, default: float) -> float:
-    """Read a non-negative float from the environment, falling back on any bad value."""
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return default
-    return value if value >= 0 else default
 
 
 def poll_attempts() -> int:

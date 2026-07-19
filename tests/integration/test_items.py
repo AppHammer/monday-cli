@@ -25,33 +25,12 @@ failing.
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from typing import Any
 
 import pytest
 
-from tests.integration.helpers import run_cli
-
-
-def _run_cli_until(
-    predicate: Any, *args: str, attempts: int = 6, delay: float = 1.5, **kwargs: Any
-) -> Any:
-    """Retry a `run_cli` call until `predicate(result)` is true, or give up.
-
-    A freshly created/updated item can briefly lag behind on an `items list`
-    read (eventual consistency on the board's `items_page`), so a read right
-    after a create needs a bounded poll rather than a single shot -- mirrors
-    the `_list_until_present` pattern in test_items_status.py.
-    """
-    result: Any = None
-    for attempt in range(attempts):
-        result = run_cli(*args, **kwargs)
-        if predicate(result):
-            return result
-        if attempt < attempts - 1:
-            time.sleep(delay)
-    return result
+from tests.integration.helpers import run_cli, run_cli_until
 
 
 @pytest.mark.integration
@@ -171,7 +150,7 @@ def test_list_pagination_contract_and_all_pages(
     # Bounded poll: both items were just created, and an `--all` read can
     # briefly lag behind on the board's items_page (eventual consistency),
     # so retry until both are visible rather than asserting on one shot.
-    all_data = _run_cli_until(
+    all_data = run_cli_until(
         lambda d: isinstance(d, dict)
         and {first_id, second_id} <= {str(item["id"]) for item in d.get("items", [])},
         "items",
@@ -206,7 +185,7 @@ def test_group_filtering_returns_only_matching_group(
     # Bounded poll: item_a was just created into group_a, and a group-filtered
     # `--all` read can briefly lag behind on eventual consistency, so retry
     # until it's visible rather than asserting on one shot.
-    data = _run_cli_until(
+    data = run_cli_until(
         lambda d: isinstance(d, dict) and any(str(i["id"]) == item_a for i in d.get("items", [])),
         "items",
         "list",
@@ -245,8 +224,8 @@ def test_g_by_id_equals_group_id_and_title_path(
     def _has_item_a(d: Any) -> bool:
         return isinstance(d, dict) and any(str(i["id"]) == item_a for i in d.get("items", []))
 
-    by_group_id = _run_cli_until(_has_item_a, *common, "--group-id", group_a)
-    by_g_id = _run_cli_until(_has_item_a, *common, "-g", group_a)
+    by_group_id = run_cli_until(_has_item_a, *common, "--group-id", group_a)
+    by_g_id = run_cli_until(_has_item_a, *common, "-g", group_a)
 
     ids_group_id = sorted(str(i["id"]) for i in by_group_id["items"])
     ids_g_id = sorted(str(i["id"]) for i in by_g_id["items"])
@@ -254,7 +233,7 @@ def test_g_by_id_equals_group_id_and_title_path(
 
     # Title path resolves to the same group.
     title_a = run_cli("items", "get", "--item-id", item_a)["group"]["title"]
-    by_g_title = _run_cli_until(_has_item_a, *common, "-g", title_a)
+    by_g_title = run_cli_until(_has_item_a, *common, "-g", title_a)
     assert sorted(str(i["id"]) for i in by_g_title["items"]) == [item_a]
 
 
@@ -289,7 +268,7 @@ def test_list_table_output_renders_group_id(
 
     # Bounded poll: a read right after create can briefly lag on eventual
     # consistency (observed flake), so retry rather than assert on one shot.
-    output = _run_cli_until(
+    output = run_cli_until(
         lambda out: group in out,
         "items",
         "list",
@@ -302,7 +281,7 @@ def test_list_table_output_renders_group_id(
     assert group in output  # the group id token appears in the table
 
     # D1: every listed item carries group{id,title}; the created one matches.
-    data = _run_cli_until(
+    data = run_cli_until(
         lambda d: any(str(i["id"]) == item_id for i in d["items"]),
         "items",
         "list",
@@ -345,7 +324,7 @@ def test_delete_removes_item_and_list_confirms_removal(
     # Bounded poll: a read right after delete can briefly lag on eventual
     # consistency -- the deleted item can still appear on the board's
     # items_page for a moment -- so retry rather than assert on one shot.
-    list_data = _run_cli_until(
+    list_data = run_cli_until(
         lambda d: isinstance(d, dict) and d.get("items") == [],
         "items",
         "list",

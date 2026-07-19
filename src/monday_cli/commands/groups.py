@@ -1,5 +1,8 @@
 """Commands for managing Monday.com groups."""
 
+import time
+from typing import TYPE_CHECKING
+
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -9,6 +12,40 @@ from monday_cli.client.mutations import CREATE_GROUP, DELETE_GROUP
 from monday_cli.client.queries import GET_BOARD_GROUPS
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
 from monday_cli.utils.output import print_json, secho_err
+
+if TYPE_CHECKING:
+    from monday_cli.client.graphql_client import MondayGraphQLClient
+
+
+def _verify_group_deleted(
+    client: "MondayGraphQLClient",
+    board_id: int,
+    group_id: str,
+    attempts: int = 4,
+    delay: float = 0.75,
+) -> bool:
+    """Confirm a group is absent from its board, tolerating read-after-delete lag.
+
+    Re-queries ``GET_BOARD_GROUPS`` up to ``attempts`` times, returning ``True``
+    as soon as the group no longer appears -- a genuine deletion, even when
+    Monday's synchronous ``delete_group.deleted`` field reported ``false`` (an
+    eventual-consistency artifact this command must not trust). Returns
+    ``False`` only if the group remains present across *every* attempt, i.e. the
+    mutation was accepted but the group is genuinely still there rather than the
+    read merely lagging.
+    """
+    for attempt in range(attempts):
+        verify_result = client.execute_query(
+            GET_BOARD_GROUPS,
+            {"boardIds": [str(board_id)]},
+        )
+        verify_boards = verify_result.get("boards", [])
+        groups = verify_boards[0].get("groups", []) if verify_boards else []
+        if not any(g.get("id") == group_id for g in groups):
+            return True
+        if attempt < attempts - 1:
+            time.sleep(delay)
+    return False
 
 
 @groups_app.command("list")
@@ -278,22 +315,49 @@ def delete_group(
 
             deleted_group = delete_result.get("delete_group")
 
-            if deleted_group:
-                # Success message
-                secho_err(
-                    f"✓ Group '{group_title}' deleted successfully!",
-                    fg=typer.colors.GREEN,
-                )
-
-                # Output deletion details
-                output = {
-                    "group_id": deleted_group.get("id"),
-                    "title": group_title,
-                    "deleted": deleted_group.get("deleted"),
-                    "board_id": str(board_id),
-                }
-
-                print_json(output)
+            if deleted_group and deleted_group.get("id"):
+                # AC-2: success is determined by a truthy `delete_group` result
+                # (a non-null `id`), NOT the raw `delete_group.deleted` boolean.
+                # Monday's synchronous API routinely returns `deleted: false`
+                # even when the group is genuinely gone (eventual-consistency
+                # lag), so forwarding that field produced a false-negative signal
+                # while the ✓ message and exit 0 said success (FR-0014). We only
+                # spend an extra verification re-query when the API itself did
+                # not confirm the delete -- keeping the common happy path at zero
+                # additional API calls.
+                if deleted_group.get("deleted") or _verify_group_deleted(
+                    client, board_id, str(group_id)
+                ):
+                    # AC-1: deleted:true, ✓, exit 0 -- all mutually consistent.
+                    secho_err(
+                        f"✓ Group '{group_title}' deleted successfully!",
+                        fg=typer.colors.GREEN,
+                    )
+                    output = {
+                        "group_id": deleted_group.get("id"),
+                        "title": group_title,
+                        "deleted": True,
+                        "board_id": str(board_id),
+                    }
+                    print_json(output)
+                else:
+                    # AC-3: the mutation was accepted but the group is verifiably
+                    # still present after a bounded re-query -- a genuine failure,
+                    # not lag. Emit a trustworthy `deleted: false` on stdout,
+                    # explain on stderr, and exit non-zero. No false positives.
+                    secho_err(
+                        f"Error: Group '{group_title}' is still present after the "
+                        "delete attempt; it was not removed.",
+                        fg=typer.colors.RED,
+                    )
+                    output = {
+                        "group_id": deleted_group.get("id"),
+                        "title": group_title,
+                        "deleted": False,
+                        "board_id": str(board_id),
+                    }
+                    print_json(output)
+                    raise typer.Exit(1)
             else:
                 secho_err(
                     "Error: Failed to delete group. No data returned from API.",
@@ -345,6 +409,12 @@ def delete_group(
     except MondayAPIError as e:
         secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)
+    except typer.Exit:
+        # Let deliberate exits (success exit 0, the AC-3 verified-failure exit 1,
+        # not-found exit 1) propagate unchanged. Without this, the catch-all
+        # below -- typer.Exit subclasses RuntimeError/Exception -- would reclassify
+        # them as an "Unexpected error" and mangle the exit-code contract.
+        raise
     except Exception as e:
         secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
         raise typer.Exit(1)

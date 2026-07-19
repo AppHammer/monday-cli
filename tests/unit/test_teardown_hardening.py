@@ -5,8 +5,14 @@ unconditionally discard the result, so a transient API blip (rate limit /
 network hiccup) was swallowed identically to "already gone" -- with no
 retry -- and a real teardown failure could leak an artifact on the shared
 TEST board silently. These tests exercise the retry/backoff/warn logic
-directly with a monkeypatched `run_cli`, so they run fast and need no live
-API traffic beyond the module's normal token gate.
+directly with a monkeypatched `run_cli`, so they run fast and make ZERO live
+API calls.
+
+Deliberately a `tests/unit` module (not `tests/integration`) even though it
+imports `tests.integration.conftest` for the function under test: it needs no
+`MONDAY_API_TOKEN` and must NOT be skipped by the integration suite's
+token-gated, secret-only CI job -- these are pure logic tests and belong in
+every `pytest tests/unit` run.
 """
 
 from __future__ import annotations
@@ -49,7 +55,6 @@ def _assert_no_warnings() -> Iterator[None]:
     assert not records, f"unexpected warnings: {[str(r.message) for r in records]}"
 
 
-@pytest.mark.integration
 def test_genuinely_not_found_is_swallowed_on_first_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -61,7 +66,6 @@ def test_genuinely_not_found_is_swallowed_on_first_attempt(
     assert calls[0] == 1
 
 
-@pytest.mark.integration
 def test_successful_delete_json_response_is_accepted_on_first_attempt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -73,7 +77,6 @@ def test_successful_delete_json_response_is_accepted_on_first_attempt(
     assert calls[0] == 1
 
 
-@pytest.mark.integration
 def test_transient_failure_is_retried_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
     """A transient error text (NOT "not found") must be retried, not swallowed
     on the first attempt -- this is the exact gap QA Bug 2 identified."""
@@ -92,7 +95,6 @@ def test_transient_failure_is_retried_then_succeeds(monkeypatch: pytest.MonkeyPa
     assert calls[0] == 3
 
 
-@pytest.mark.integration
 def test_persistent_failure_warns_after_exhausting_retries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -120,7 +122,6 @@ def test_persistent_failure_warns_after_exhausting_retries(
     assert calls[0] == 3
 
 
-@pytest.mark.integration
 def test_teardown_never_raises_even_on_unexpected_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

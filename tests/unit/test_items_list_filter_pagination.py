@@ -13,6 +13,16 @@ Covers three findings on FR-0009's PR #61:
 3. [QA] The resolved group id must always be echoed under the single stable
    `group_id_filter` JSON key, regardless of whether `-g`/`--group` or
    `--group-id` was used, without removing the existing `group_filter` key.
+
+Round-2 findings on the same PR:
+
+4. [code-review] A supplied `--cursor` combined with an active group/status
+   filter must be IGNORED -- the forced full-board scan always starts from
+   the beginning, so a non-empty group/status whose matches precede the
+   caller's cursor is never mistaken for empty.
+5. [code-review] An invalid `--group-id`/`-g`/`--status` must fail fast,
+   BEFORE the (expensive) multi-page scan -- not after burning the full
+   pagination budget on a request whose result is discarded anyway.
 """
 
 from __future__ import annotations
@@ -168,3 +178,66 @@ def test_dash_g_by_id_also_echoes_resolved_id_under_stable_key(runner, use_clien
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert data["group_id_filter"] == "group_a"
+
+
+def test_cursor_ignored_when_group_filter_active(runner, use_client) -> None:
+    """A caller-supplied --cursor must be ignored whenever a group filter is
+    active: the scan always starts from page 1, so the Alpha item on page 2
+    is still found even though a (bogus, mid-stream) cursor was passed."""
+    client = _paginated_client()
+    use_client(client)
+    result = runner.invoke(
+        app,
+        [
+            "items",
+            "list",
+            "--board-id",
+            "1",
+            "--group-id",
+            "group_a",
+            "--cursor",
+            "caller-supplied-cursor",
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert [i["id"] for i in data["items"]] == ["3"]
+    # The first (board items) query must never carry the caller's cursor.
+    first_query, first_variables = client.queries[0]
+    assert "items_page" in first_query
+    assert "cursor" not in (first_variables or {})
+
+
+def test_invalid_group_id_fails_fast_without_full_scan(runner, use_client) -> None:
+    """An invalid --group-id must error BEFORE the multi-page scan runs --
+    the paginated next-page query must never be dispatched."""
+    client = _paginated_client()
+    use_client(client)
+    result = runner.invoke(
+        app, ["items", "list", "--board-id", "1", "--group-id", "not-a-real-group"]
+    )
+    assert result.exit_code == 1
+    assert "Available groups" in result.stdout
+    assert not any("next_items_page" in q for q, _ in client.queries)
+
+
+def test_invalid_status_fails_fast_without_full_scan(runner, use_client) -> None:
+    """An invalid --status must also error before the multi-page scan runs."""
+    status_col = {
+        "id": "status_col",
+        "title": "Status",
+        "type": "status",
+        "settings_str": json.dumps({"labels": {"0": "Done", "1": "Stuck"}}),
+    }
+    client = FakeClient(
+        board_items=[_item("1", GROUP_A)],
+        initial_cursor="cursor-to-page-2",
+        next_pages=[([_item("2", GROUP_A)], None)],
+        columns=[status_col],
+        groups=GROUPS,
+    )
+    use_client(client)
+    result = runner.invoke(app, ["items", "list", "--board-id", "1", "--status", "Nope"])
+    assert result.exit_code == 1
+    assert "Available statuses" in result.stdout
+    assert not any("next_items_page" in q for q, _ in client.queries)

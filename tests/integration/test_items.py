@@ -25,11 +25,33 @@ failing.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
+from typing import Any
 
 import pytest
 
 from tests.integration.helpers import run_cli
+
+
+def _run_cli_until(
+    predicate: Any, *args: str, attempts: int = 6, delay: float = 1.5, **kwargs: Any
+) -> Any:
+    """Retry a `run_cli` call until `predicate(result)` is true, or give up.
+
+    A freshly created/updated item can briefly lag behind on an `items list`
+    read (eventual consistency on the board's `items_page`), so a read right
+    after a create needs a bounded poll rather than a single shot -- mirrors
+    the `_list_until_present` pattern in test_items_status.py.
+    """
+    result: Any = None
+    for attempt in range(attempts):
+        result = run_cli(*args, **kwargs)
+        if predicate(result):
+            return result
+        if attempt < attempts - 1:
+            time.sleep(delay)
+    return result
 
 
 @pytest.mark.integration
@@ -236,12 +258,31 @@ def test_list_table_output_renders_group_id(
     group = created_group("table-groupid")
     item_id = created_item("table-item", group_id=group)
 
-    output = run_cli("items", "list", "--board-id", test_board_id, "--table", raw=True)
+    # Bounded poll: a read right after create can briefly lag on eventual
+    # consistency (observed flake), so retry rather than assert on one shot.
+    output = _run_cli_until(
+        lambda out: group in out,
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "--table",
+        raw=True,
+    )
     assert output.strip() != ""
     assert group in output  # the group id token appears in the table
 
     # D1: every listed item carries group{id,title}; the created one matches.
-    data = run_cli("items", "list", "--board-id", test_board_id, "--all", "--limit", "500")
+    data = _run_cli_until(
+        lambda d: any(str(i["id"]) == item_id for i in d["items"]),
+        "items",
+        "list",
+        "--board-id",
+        test_board_id,
+        "--all",
+        "--limit",
+        "500",
+    )
     for item in data["items"]:
         if item.get("group") is not None:
             assert "id" in item["group"] and "title" in item["group"]

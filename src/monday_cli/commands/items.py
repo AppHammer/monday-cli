@@ -580,6 +580,9 @@ def list_items(
     filtered query implies a full scan). When a filter forces this internal full
     scan, the JSON `cursor` is null and `has_more` is false (pagination is
     exhausted); without any filter, normal single-page pagination is unchanged.
+    A supplied --cursor is IGNORED whenever a filter is active -- the scan
+    always starts from the beginning of the board so filtered results stay
+    complete and correct, never a partial view starting mid-board.
 
     Filter by group using -g/--group (accepts a group TITLE or id, auto-detected)
     or --group-id (id-only, exact match). Passing a group id to -g returns exactly
@@ -662,13 +665,16 @@ def list_items(
 
         client = get_client()
 
-        # Fetch first page
+        # Fetch first page. A supplied --cursor is ignored whenever a filter
+        # is active: honoring it would start the forced full-board scan
+        # partway through, so a non-empty group/status whose matches precede
+        # that cursor could still come back as items: [] -- silently wrong.
         variables = {
             "boardIds": [str(final_board_id)],
             "limit": limit,
         }
 
-        if cursor:
+        if cursor and not filter_active:
             variables["cursor"] = cursor
 
         result = client.execute_query(GET_BOARD_ITEMS, variables)
@@ -705,55 +711,13 @@ def list_items(
         all_items = items_page.get("items", [])
         next_cursor = items_page.get("cursor")
 
-        # Fetch every remaining page when the caller asked for --all OR when a
-        # group/status filter is active (a filtered query implies a full
-        # scan -- see `filter_active` above). Progress messages are only
-        # printed for an explicit --all; a scan forced internally by a filter
-        # must stay invisible so stdout remains clean, parseable JSON.
-        pages_fetched = 1
-        scan_all = all_pages or filter_active
-        if scan_all and next_cursor:
-            if all_pages:
-                typer.secho(
-                    f"Fetching page {pages_fetched}... ({len(all_items)} items)",
-                    fg=typer.colors.BLUE,
-                )
-
-            while next_cursor:
-                pages_fetched += 1
-                if all_pages:
-                    typer.secho(
-                        f"Fetching page {pages_fetched}...",
-                        fg=typer.colors.BLUE,
-                    )
-
-                result = client.execute_query(
-                    GET_NEXT_ITEMS_PAGE,
-                    {"cursor": next_cursor, "limit": limit},
-                )
-
-                next_page = result.get("next_items_page", {})
-                page_items = next_page.get("items", [])
-                all_items.extend(page_items)
-                next_cursor = next_page.get("cursor")
-
-                if all_pages:
-                    typer.secho(
-                        f"  Total items so far: {len(all_items)}",
-                        fg=typer.colors.BLUE,
-                    )
-
-                # Safety check to prevent infinite loops
-                if pages_fetched > 1000:
-                    if all_pages:
-                        typer.secho(
-                            "Warning: Reached maximum page limit (1000). Stopping pagination.",
-                            fg=typer.colors.YELLOW,
-                        )
-                    break
-
-        # Apply group filtering if specified (client-side, over the fully
-        # scanned item set fetched above when a filter is active).
+        # Resolve & validate group/status filters BEFORE the potentially
+        # expensive multi-page full-board scan below. These lookups (board
+        # groups / board columns) are single, cheap calls -- hoisting them
+        # here means an invalid --group/--group-id/--status fails fast (exit
+        # 1, teaching error) without first burning the paginated-items
+        # request budget (60 calls/60s) on a scan whose result would be
+        # discarded anyway.
         #   --group-id : id-only, exact match, validated against the board's
         #     real groups so an unknown id teaches instead of silently
         #     returning items: [].
@@ -783,11 +747,6 @@ def list_items(
                 )
                 raise typer.Exit(1)
             resolved_group_id = group_id
-            all_items = [
-                item
-                for item in all_items
-                if item.get("group") and item["group"].get("id") == resolved_group_id
-            ]
         elif group:
             resolved_group, groups = resolve_group_ref(client, str(final_board_id), group)
             if resolved_group is None:
@@ -805,16 +764,13 @@ def list_items(
                 )
                 raise typer.Exit(1)
             resolved_group_id = resolved_group["id"]
-            all_items = [
-                item
-                for item in all_items
-                if item.get("group") and item["group"].get("id") == resolved_group_id
-            ]
 
-        # Apply status filtering if specified (client-side, composes with the
-        # group filter above as a logical AND). Resolves which status column to
-        # target and validates the label against that column only (C1-C4).
+        # Resolves which status column to target and validates the label
+        # against that column only (C1-C4). Composes with the group filter
+        # above as a logical AND once both are applied to the scanned items.
         resolved_status_column_title: str | None = None
+        status_column_id: str | None = None
+        status_lower: str | None = None
         if status:
             status_columns = get_status_columns(client, str(final_board_id))
 
@@ -880,11 +836,73 @@ def list_items(
                 raise typer.Exit(1)
 
             resolved_status_column_title = chosen_column["title"]
-            column_id = chosen_column["id"]
+            status_column_id = chosen_column["id"]
+
+        # Fetch every remaining page when the caller asked for --all OR when a
+        # group/status filter is active (a filtered query implies a full
+        # scan -- see `filter_active` above; any invalid filter already
+        # raised above, so only a valid filter or no filter reaches here).
+        # Progress messages are only printed for an explicit --all; a scan
+        # forced internally by a filter must stay invisible so stdout
+        # remains clean, parseable JSON.
+        pages_fetched = 1
+        scan_all = all_pages or filter_active
+        if scan_all and next_cursor:
+            if all_pages:
+                typer.secho(
+                    f"Fetching page {pages_fetched}... ({len(all_items)} items)",
+                    fg=typer.colors.BLUE,
+                )
+
+            while next_cursor:
+                pages_fetched += 1
+                if all_pages:
+                    typer.secho(
+                        f"Fetching page {pages_fetched}...",
+                        fg=typer.colors.BLUE,
+                    )
+
+                result = client.execute_query(
+                    GET_NEXT_ITEMS_PAGE,
+                    {"cursor": next_cursor, "limit": limit},
+                )
+
+                next_page = result.get("next_items_page", {})
+                page_items = next_page.get("items", [])
+                all_items.extend(page_items)
+                next_cursor = next_page.get("cursor")
+
+                if all_pages:
+                    typer.secho(
+                        f"  Total items so far: {len(all_items)}",
+                        fg=typer.colors.BLUE,
+                    )
+
+                # Safety check to prevent infinite loops
+                if pages_fetched > 1000:
+                    if all_pages:
+                        typer.secho(
+                            "Warning: Reached maximum page limit (1000). Stopping pagination.",
+                            fg=typer.colors.YELLOW,
+                        )
+                    break
+
+        # Apply group filtering (already resolved/validated above, over the
+        # fully scanned item set fetched above when a filter is active).
+        if resolved_group_id:
+            all_items = [
+                item
+                for item in all_items
+                if item.get("group") and item["group"].get("id") == resolved_group_id
+            ]
+
+        # Apply status filtering (already resolved/validated above; composes
+        # with the group filter above as a logical AND).
+        if status_column_id:
 
             def _matches_status(item: dict[str, Any]) -> bool:
                 for cv in item.get("column_values", []):
-                    if cv.get("id") == column_id:
+                    if cv.get("id") == status_column_id:
                         text = cv.get("text") or ""
                         # Unset status (blank text) is excluded from a positive match.
                         return text.strip() != "" and text.lower() == status_lower

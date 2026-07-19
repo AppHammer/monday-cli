@@ -34,6 +34,7 @@ dev = [
     "mypy>=1.8.0",
     "pyinstaller>=6.3.0",
     "python-semantic-release>=9.0.0",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]

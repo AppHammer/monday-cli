@@ -73,12 +73,20 @@ class MondayGraphQLClient:
         self.client.close()
         logger.debug("Closed Monday GraphQL client")
 
-    def _make_request(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _make_request(
+        self,
+        query: str,
+        variables: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         """Make a GraphQL request.
 
         Args:
             query: GraphQL query or mutation
             variables: Optional query variables
+            timeout: Optional per-request timeout in seconds. When None the
+                httpx.Client default (REQUEST_TIMEOUT) is used. Pass a larger
+                value (e.g. DOC_WRITE_TIMEOUT) for operations known to be slow.
 
         Returns:
             Response data
@@ -99,7 +107,10 @@ class MondayGraphQLClient:
             logger.debug(f"Variables: {variables}")
 
         try:
-            response = self.client.post(self.api_url, json=payload)
+            if timeout is not None:
+                response = self.client.post(self.api_url, json=payload, timeout=timeout)
+            else:
+                response = self.client.post(self.api_url, json=payload)
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
@@ -169,13 +180,20 @@ class MondayGraphQLClient:
         return cast(dict[str, Any], response.get("data", {}))
 
     def execute_mutation(
-        self, mutation: str, variables: dict[str, Any] | None = None
+        self,
+        mutation: str,
+        variables: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """Execute a GraphQL mutation with retry and rate limiting.
 
         Args:
             mutation: GraphQL mutation
             variables: Optional mutation variables
+            timeout: Optional per-request timeout in seconds. When None the
+                httpx.Client default (REQUEST_TIMEOUT = 30 s) is used. Pass
+                DOC_WRITE_TIMEOUT (120 s) for large doc-content write mutations
+                that may take longer than the global default.
 
         Returns:
             Response data dictionary
@@ -184,7 +202,7 @@ class MondayGraphQLClient:
             Various exceptions from _make_request
         """
         response: dict[str, Any] = cast(
-            dict[str, Any], self._rate_limited_request(mutation, variables)
+            dict[str, Any], self._rate_limited_request(mutation, variables, timeout)
         )
         return cast(dict[str, Any], response.get("data", {}))
 

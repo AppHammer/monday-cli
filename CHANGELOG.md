@@ -1,100 +1,19 @@
 # CHANGELOG
 
 
-## v0.6.3 — FR-0009 group- & status-aware item operations
+## v0.6.1 (2026-07-18)
 
-Group- and status-aware `items` operations. `-g` now means the same thing
-(group **title or id**, auto-detected) across `items list`, `items create`, and
-the new `items move`; `--group-id` stays id-only. All work is client-side and
-composes with pagination.
+### Bug Fixes
 
-### Added
+- Reliable large-document writes to Monday doc columns (FR-0005)
+  ([#55](https://github.com/AppHammer/monday-cli/pull/55),
+  [`ab372ea`](https://github.com/AppHammer/monday-cli/commit/ab372eaaabedb195935e545ef383878b0eb8283a))
 
-- **`monday items move`** — move an item to another group on its own board, by
-  group title or id. Adds a `MOVE_ITEM_TO_GROUP` mutation. Rejects subitems with
-  a teaching error; moving an item to the group it is already in is a safe no-op
-  (exit 0, same JSON shape). (Epic A, Closes #59)
-- **`items list --status "<label>"` / `--status-column "<title>"`** — client-side
-  status filtering (case-insensitive label match, same semantics as
-  `items update`). Boards with more than one status column require
-  `--status-column`; omitting it raises a teaching error listing the choices
-  (never guesses). `--status` composes with `--group`/`--group-id` as a logical
-  AND. JSON output gains `status_filter` + `status_column` metadata. (Epic C,
-  Closes #60)
-- **`items list --table`** now shows a dedicated `Group ID` column alongside the
-  group title (rows with no group render `N/A`); default JSON output is
-  unchanged. The `group { id title }` selection in `items list`/`items get` JSON
-  is regression-locked. (Epic D, Closes #56)
+Safe large put (preflight/chunking + per-request timeout), idempotent put/append, block-order +
+  timeout hardening, docs clear/reset, lossless docs get blocks. Live-QA'd on the test board;
+  reviewed + fix-looped.
 
-### Changed
-
-- **`items create -g` widened from id-only to title-or-id.** `-g` now binds to
-  `--group` (a group **title or id**, auto-detected) instead of `--group-id`.
-  This is backward compatible — passing a group id to `-g` still works via
-  auto-detection — but is a deliberate behavior change so `-g` is consistent
-  across all `items` subcommands. `--group-id` remains available on `create` as
-  an id-only long option. (Epic B/B3, Closes #58)
-
-### Fixed
-
-- **`items list -g` now accepts a group id.** Previously `-g` matched group
-  *titles* only, so passing a `group_xxxx` id (or the default `topics` id)
-  silently matched nothing and printed "No items found". `-g <id>` now returns
-  exactly what `--group-id <same id>` returns. (Epic B, Closes #57)
-- **Unknown vs. empty group are now distinguishable on `items list`.** An
-  unknown `-g` value is a teaching error listing available groups as id + title
-  (exit 1); a valid-but-empty group returns JSON `items: []` with filter
-  metadata (exit 0). The old ambiguous "No items found" / exit 0 for the
-  valid-but-empty case is gone. (Epic B, Closes #57)
-- **A group/status filter on `items list` now always scans the whole board.**
-  Previously a filter only applied to the already-fetched page unless `--all`
-  was also passed, so a genuinely non-empty group/status whose matches lived
-  beyond page 1 could come back as `items: []` (exit 0) — indistinguishable
-  from an actually-empty one. Any active `-g`/`--group`, `--group-id`, or
-  `--status` filter now implies a full internal scan regardless of `--all`;
-  when that scan is forced, `cursor` is `null` and `has_more` is `false`
-  (coherent, not a misleading mid-stream cursor) rather than the pre-filter
-  page's cursor.
-- **`--group-id` now validates against the board's real groups.** An unknown
-  `--group-id` used to silently return `items: []` (exit 0); it is now a
-  teaching error listing available groups (exit 1), symmetric with the
-  existing `-g`/`--group` behavior. A valid-but-empty group id is unaffected
-  (`items: []`, exit 0).
-- **`items list` JSON always echoes the resolved group id under one stable
-  key.** `group_id_filter` is now populated with the *resolved* group id for
-  every active group filter, regardless of whether `-g`/`--group` or
-  `--group-id` was used (previously only `--group-id` populated it, and `-g`
-  only echoed the raw, unresolved input under `group_filter`). Both keys are
-  preserved — nothing is renamed or removed, only added — so existing
-  consumers of either key keep working.
-
-
-## Unreleased — FR-0006 quality baseline (no version bump: chore/ci only)
-
-### Added
-
-- Lint & type-check CI gate (`quality.yml`): `ruff check`, `black --check`, and `mypy` enforced on
-  every pull request and push to main. Failures name the failing tool. (Closes #42)
-
-### Changed
-
-- Cleaned `src/` to pass the documented quality gate with no public CLI or output change: (Closes
-  #39, #40, #41)
-  - Applied `black` formatting to all 12 files that were not yet conformant (line-length 100,
-    target py311). Formatting-only; no logic or string-content changes.
-  - Resolved all `ruff check src` findings to zero: auto-fixed `UP045` (`Optional[X]` → `X | None`)
-    and `I001` (import sort); hand-fixed 16 `E501` line-too-long violations in `commands/` by
-    splitting long strings across implicit string concatenation and extracting intermediate variables.
-    Migrated `[tool.ruff]` `select` to `[tool.ruff.lint]` (location move only; identical rule set).
-  - Fixed all 15 `mypy --strict` errors across 6 files: annotated `payload` dict type in
-    `graphql_client.py`; `cast()` on `Any` returns from `_rate_limited_request`; typed `variables`
-    dicts in `workspaces.py` and `boards.py` as `dict[str, Any]`; added a defensive `(group or "")`
-    guard in `items.py` for the `str | None` union-attr; removed stale `# type: ignore` in
-    `retry.py`; added full type annotations to four private helpers in `docs.py`. No runtime
-    behavior change — the `items.py` None guard is defensive only (group is guaranteed non-None in
-    that branch at runtime).
-- Documented the quality gate in `CLAUDE.md` (Closes #43): added CI-enforcement note to the "Lint /
-  format / type-check" block and added `quality.yml` to the CI Workflows table.
+Closes #32, closes #33, closes #34, closes #35, closes #36, closes #38
 
 
 ## v0.6.0 (2026-07-18)

@@ -5,6 +5,8 @@ the sibling functions below, added in the dependent issues (#86/#87/#88/#89).
 """
 
 import json
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import typer
@@ -14,6 +16,7 @@ from rich.table import Table
 from monday_cli.cli import columns_app, get_client
 from monday_cli.client.mutations import (
     CHANGE_COLUMN_TITLE,
+    CHANGE_COLUMN_VALUE,
     CHANGE_COLUMN_VALUE_CREATE_LABELS,
     CREATE_COLUMN,
     DELETE_COLUMN,
@@ -38,6 +41,41 @@ _SUPPORTED_TYPES = {
     "doc",
     "checkbox",
 }
+
+
+@contextmanager
+def _handle_api_errors() -> Iterator[None]:
+    """Context manager that converts API/auth/rate-limit exceptions to secho_err + Exit(1).
+
+    Preserves:
+      - ``typer.Exit`` re-raised as-is (allows inner exits with 0 or 1 to propagate).
+      - ``AuthenticationError`` → red message + exit 1.
+      - ``RateLimitError`` → yellow message + exit 1.
+      - ``MondayAPIError`` → red "API Error:" prefix + exit 1.
+      - Any other ``Exception`` → red "Unexpected error:" prefix + exit 1.
+
+    All prose goes to stderr (FR-0008 contract); callers are responsible for
+    stdout JSON via ``print_json``.
+    """
+    try:
+        yield
+    except typer.Exit:
+        raise
+    except AuthenticationError:
+        secho_err(
+            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    except RateLimitError as e:
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    except MondayAPIError as e:
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    except Exception as e:
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
 
 
 def _apply_label_changes(
@@ -118,14 +156,24 @@ def _apply_label_changes(
     # --- add labels ----------------------------------------------------------
     if add_labels:
         # Fetch a board item to write to (required by change_column_value).
+        # The query also returns column_values so we can save and restore the
+        # item's current value for this column (the write has a side-effect of
+        # assigning the label to the item's cell — Fix 1 / code-review suggestion).
         item_result = client.execute_query(GET_BOARD_FIRST_ITEM, {"boardIds": [str(board_id)]})
         boards = item_result.get("boards", [])
         item_id: str | None = None
+        prior_value: str | None = None
         if boards:
             items_page = boards[0].get("items_page", {})
             items = items_page.get("items", [])
             if items:
-                item_id = str(items[0]["id"])
+                first_item = items[0]
+                item_id = str(first_item["id"])
+                # Find the current raw JSON value for this column so we can restore it.
+                for cv in first_item.get("column_values", []):
+                    if cv.get("id") == column_id:
+                        prior_value = cv.get("value")  # may be None if cell is empty
+                        break
 
         if item_id is None:
             secho_err(
@@ -148,6 +196,31 @@ def _apply_label_changes(
                 },
             )
             labels_added.append(label_text)
+
+        # Restore the item's column cell to its prior value to undo the side-effect.
+        # CHANGE_COLUMN_VALUE_CREATE_LABELS assigns the last-written label to the
+        # target item's cell; we revert that write here so the user's data is not
+        # left mutated.
+        restore_value = prior_value if prior_value is not None else "null"
+        try:
+            client.execute_mutation(
+                CHANGE_COLUMN_VALUE,
+                {
+                    "boardId": str(board_id),
+                    "itemId": item_id,
+                    "columnId": column_id,
+                    "value": restore_value,
+                },
+            )
+        except Exception:
+            # Restoration is best-effort: failing to restore does not undo the
+            # label additions, so we warn rather than propagate an error.
+            secho_err(
+                f"Warning: could not restore item {item_id}'s column '{column_id}' "
+                "to its prior value after --add-label. The label was added successfully "
+                "but the item's cell value may have changed.",
+                fg=typer.colors.YELLOW,
+            )
 
         applied["labels_added"] = labels_added
 
@@ -212,10 +285,18 @@ def _parse_labels(col: dict[str, Any]) -> list[dict[str, Any]]:
         parsed.sort(key=lambda x: x["index"])
     elif isinstance(labels, list):
         # dropdown (read-back): [{"id": 1, "name": "Alpha"}, ...]
+        # Coerce "id" to int (skip entries where "id" is missing or non-coercible),
+        # matching the status branch which filters out non-int index keys.
         for entry in labels:
-            if isinstance(entry, dict):
-                parsed.append({"index": entry.get("id"), "label": entry.get("name")})
-        parsed.sort(key=lambda x: (x["index"] is None, x["index"]))
+            if not isinstance(entry, dict):
+                continue
+            raw_id = entry.get("id")
+            try:
+                idx = int(raw_id)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                continue
+            parsed.append({"index": idx, "label": entry.get("name")})
+        parsed.sort(key=lambda x: x["index"])
     return parsed
 
 
@@ -241,7 +322,7 @@ def update_column(
         monday columns update -b 123 -c status --add-label "Blocked"
         monday columns update -b 123 -c status --rename-label "Stuck=Blocked"
     """
-    try:
+    with _handle_api_errors():
         if not title and not add_label and not rename_label:
             secho_err(
                 "Error: Nothing to update. Pass --title, --add-label, or --rename-label.",
@@ -307,24 +388,6 @@ def update_column(
         secho_err("✓ Column updated successfully!", fg=typer.colors.GREEN)
         print_json(applied)
 
-    except AuthenticationError:
-        secho_err(
-            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(1)
-    except RateLimitError as e:
-        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
-        raise typer.Exit(1)
-    except MondayAPIError as e:
-        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-    except typer.Exit:
-        raise
-    except Exception as e:
-        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-
 
 @columns_app.command("create")
 def create_column(
@@ -353,7 +416,7 @@ def create_column(
         monday columns create --board-id 123 --title Priority --type status --labels "Low,High"
         monday columns create --board-id 123 --title Notes --type text
     """
-    try:
+    with _handle_api_errors():
         column_type = column_type.strip().lower()
         if column_type not in _SUPPORTED_TYPES:
             secho_err(
@@ -389,7 +452,28 @@ def create_column(
         if description:
             variables["description"] = description
 
-        result = client.execute_mutation(CREATE_COLUMN, variables)
+        try:
+            result = client.execute_mutation(CREATE_COLUMN, variables)
+        except MondayAPIError as e:
+            # Detect collision/invalid column id errors and surface a teaching error.
+            # The Monday API returns a message containing "InvalidColumnIdException" or
+            # mentions "column id" when a custom --column-id is already in use or
+            # violates the 1-20 chars [a-z0-9_] uniqueness constraint.
+            err_str = str(e)
+            if column_id and (
+                "InvalidColumnIdException" in err_str
+                or "column id" in err_str.lower()
+                or "already exists" in err_str.lower()
+                or "invalid id" in err_str.lower()
+            ):
+                secho_err(
+                    f"Error: Column id '{column_id}' already exists or is invalid. "
+                    "Column ids must be 1-20 chars [a-z0-9_] and unique on the board.",
+                    fg=typer.colors.RED,
+                )
+                raise typer.Exit(1)
+            raise
+
         column = result.get("create_column")
         if not column or not column.get("id"):
             secho_err(
@@ -411,24 +495,6 @@ def create_column(
             }
         )
 
-    except AuthenticationError:
-        secho_err(
-            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(1)
-    except RateLimitError as e:
-        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
-        raise typer.Exit(1)
-    except MondayAPIError as e:
-        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-    except typer.Exit:
-        raise
-    except Exception as e:
-        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-
 
 @columns_app.command("list")
 def list_columns(
@@ -441,7 +507,7 @@ def list_columns(
         monday columns list --board-id 1234567890
         monday columns list --board-id 1234567890 --table
     """
-    try:
+    with _handle_api_errors():
         if board_id is None:
             secho_err(
                 "Error: Board ID is required. Use --board-id",
@@ -506,24 +572,6 @@ def list_columns(
                 }
             )
 
-    except AuthenticationError:
-        secho_err(
-            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(1)
-    except RateLimitError as e:
-        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
-        raise typer.Exit(1)
-    except MondayAPIError as e:
-        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-    except typer.Exit:
-        raise
-    except Exception as e:
-        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-
 
 @columns_app.command("delete")
 def delete_column(
@@ -542,7 +590,7 @@ def delete_column(
         monday columns delete --board-id 123 --column-id status
         monday columns delete --board-id 123 --column-id status --force
     """
-    try:
+    with _handle_api_errors():
         client = get_client()
 
         # Validate the column exists before prompting or deleting (AC4).
@@ -602,21 +650,3 @@ def delete_column(
                 "board_id": str(board_id),
             }
         )
-
-    except AuthenticationError:
-        secho_err(
-            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
-            fg=typer.colors.RED,
-        )
-        raise typer.Exit(1)
-    except RateLimitError as e:
-        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
-        raise typer.Exit(1)
-    except MondayAPIError as e:
-        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)
-    except typer.Exit:
-        raise
-    except Exception as e:
-        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
-        raise typer.Exit(1)

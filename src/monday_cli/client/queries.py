@@ -333,6 +333,7 @@ query GetNextItemsPage($cursor: String!, $limit: Int) {
 
 # Fetch the first item on a board (limit 1) to use as a target for
 # CHANGE_COLUMN_VALUE_CREATE_LABELS (label-add requires a real item to write to).
+# Also returns the column value so the caller can save and restore it.
 GET_BOARD_FIRST_ITEM = """
 query GetBoardFirstItem($boardIds: [ID!]!) {
   boards(ids: $boardIds) {
@@ -340,6 +341,10 @@ query GetBoardFirstItem($boardIds: [ID!]!) {
     items_page(limit: 1) {
       items {
         id
+        column_values {
+          id
+          value
+        }
       }
     }
   }

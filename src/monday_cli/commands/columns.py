@@ -12,11 +12,55 @@ from rich.console import Console
 from rich.table import Table
 
 from monday_cli.cli import columns_app, get_client
+from monday_cli.client.mutations import CREATE_COLUMN
 from monday_cli.client.queries import GET_BOARD_COLUMNS
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
 from monday_cli.utils.output import print_json, secho_err
 
 _LABELLED_TYPES = {"status", "dropdown"}
+
+# Supported column types for `columns create`. Exotic/formula types are out of
+# scope per FRD (mirror, formula, connect_boards, dependency, time_tracking).
+_SUPPORTED_TYPES = {
+    "status",
+    "dropdown",
+    "text",
+    "long_text",
+    "numbers",
+    "date",
+    "people",
+    "link",
+    "doc",
+    "checkbox",
+}
+
+
+def _build_defaults(column_type: str, labels: list[str]) -> str | None:
+    """Build the ``defaults`` JSON string for status/dropdown label seeding.
+
+    Returns a JSON string suitable for the Monday ``create_column`` mutation's
+    ``defaults`` argument, or ``None`` when the type does not support labels or
+    no labels were supplied.
+
+    Shapes are VERIFIED live (see .genesis/VERIFIED_FINDINGS.md):
+
+    - status:   ``{"labels": {"1": "A", "2": "B"}}``  (index→label map, start at 1)
+    - dropdown: ``{"settings": {"labels": [{"id": 1, "label": "A"}, ...]}}``
+                (nested under "settings", write-key is "label"; read-back uses "name")
+    """
+    if not labels:
+        return None
+    if column_type == "status":
+        return json.dumps({"labels": {str(i): name for i, name in enumerate(labels, start=1)}})
+    if column_type == "dropdown":
+        return json.dumps(
+            {
+                "settings": {
+                    "labels": [{"id": i, "label": name} for i, name in enumerate(labels, start=1)]
+                }
+            }
+        )
+    return None  # caller handles AC4 (labels on unsupported type)
 
 
 def _parse_labels(col: dict[str, Any]) -> list[dict[str, Any]]:
@@ -54,6 +98,110 @@ def _parse_labels(col: dict[str, Any]) -> list[dict[str, Any]]:
                 parsed.append({"index": entry.get("id"), "label": entry.get("name")})
         parsed.sort(key=lambda x: (x["index"] is None, x["index"]))
     return parsed
+
+
+@columns_app.command("create")
+def create_column(
+    board_id: int = typer.Option(..., "--board-id", "-b", help="ID of the board"),
+    title: str = typer.Option(..., "--title", "-t", help="Title of the new column"),
+    column_type: str = typer.Option(
+        ..., "--type", help="Monday column type (e.g. status, dropdown, text)"
+    ),
+    labels: str | None = typer.Option(
+        None, "--labels", help="Comma-separated labels for status/dropdown columns"
+    ),
+    column_id: str | None = typer.Option(
+        None, "--column-id", help="Custom column id (1-20 chars, a-z/_; must be unique on board)"
+    ),
+    description: str | None = typer.Option(None, "--description", help="Column description"),
+) -> None:
+    """Create a board column of a given type, optionally seeding status/dropdown labels.
+
+    Supported types: checkbox, date, doc, dropdown, link, long_text, numbers,
+    people, status, text.
+
+    Labels (--labels) are only accepted for status and dropdown columns. Passing
+    --labels with any other type is a teaching error (exit 1, no API call).
+
+    Example:
+        monday columns create --board-id 123 --title Priority --type status --labels "Low,High"
+        monday columns create --board-id 123 --title Notes --type text
+    """
+    try:
+        column_type = column_type.strip().lower()
+        if column_type not in _SUPPORTED_TYPES:
+            secho_err(
+                f"Error: Unsupported column type '{column_type}'.",
+                fg=typer.colors.RED,
+            )
+            secho_err(
+                f"Supported types: {', '.join(sorted(_SUPPORTED_TYPES))}",
+                fg=typer.colors.BLUE,
+            )
+            raise typer.Exit(1)
+
+        label_list = [s.strip() for s in labels.split(",") if s.strip()] if labels else []
+        if label_list and column_type not in _LABELLED_TYPES:
+            secho_err(
+                f"Error: --labels only applies to {', '.join(sorted(_LABELLED_TYPES))} columns,"
+                f" not '{column_type}'.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+
+        client = get_client()
+        variables: dict[str, Any] = {
+            "boardId": str(board_id),
+            "title": title,
+            "columnType": column_type,
+        }
+        defaults = _build_defaults(column_type, label_list)
+        if defaults is not None:
+            variables["defaults"] = defaults
+        if column_id:
+            variables["columnId"] = column_id
+        if description:
+            variables["description"] = description
+
+        result = client.execute_mutation(CREATE_COLUMN, variables)
+        column = result.get("create_column")
+        if not column or not column.get("id"):
+            secho_err(
+                "Error: Failed to create column. No data returned from API.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+
+        secho_err(
+            f"✓ Column '{column.get('title')}' created successfully!",
+            fg=typer.colors.GREEN,
+        )
+        print_json(
+            {
+                "column_id": column.get("id"),
+                "title": column.get("title"),
+                "type": column.get("type"),
+                "board_id": str(board_id),
+            }
+        )
+
+    except AuthenticationError:
+        secho_err(
+            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    except RateLimitError as e:
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    except MondayAPIError as e:
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
 
 
 @columns_app.command("list")

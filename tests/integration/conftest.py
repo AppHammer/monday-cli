@@ -400,6 +400,65 @@ def created_group(test_board_id: str, run_id: str) -> Iterator[Callable[..., str
 
 
 @pytest.fixture
+def created_column(test_board_id: str, run_id: str) -> Iterator[Callable[..., str]]:
+    """Factory fixture: create columns on the test board, deleted at teardown.
+
+    Returns a callable; call it once per column you need:
+
+        def test_x(created_column):
+            column_id = created_column("Notes", "text")
+            other_id  = created_column("Priority", "status", labels="Low,High")
+
+    Every column created through the factory is torn down via
+    ``columns delete --board-id <bid> --column-id <cid> --force`` — which
+    exists once issue #88 lands on this branch. Until then, the teardown call
+    is silently best-effort (``_swallow_not_found`` already tolerates any
+    outcome rather than raising, so the fixture is safe to use before #88 is
+    merged).
+    """
+    records: list[tuple[str, str]] = []  # (board_id, column_id)
+    counter = 0
+
+    def _create(
+        title_suffix: str | None = None,
+        col_type: str = "text",
+        labels: str | None = None,
+    ) -> str:
+        nonlocal counter
+        counter += 1
+        title = f"{run_id}-{title_suffix}" if title_suffix else f"{run_id}-col-{counter}"
+        args = [
+            "columns",
+            "create",
+            "--board-id",
+            test_board_id,
+            "--title",
+            title,
+            "--type",
+            col_type,
+        ]
+        if labels:
+            args += ["--labels", labels]
+        data = run_cli(*args)
+        column_id = str(data["column_id"])
+        records.append((test_board_id, column_id))
+        return column_id
+
+    yield _create
+
+    for bid, cid in records:
+        _swallow_not_found(
+            "columns",
+            "delete",
+            "--board-id",
+            bid,
+            "--column-id",
+            cid,
+            "--force",
+        )
+
+
+@pytest.fixture
 def created_item(test_board_id: str, run_id: str) -> Iterator[Callable[..., str]]:
     """Factory fixture: create items on the test board, deleted at teardown.
 

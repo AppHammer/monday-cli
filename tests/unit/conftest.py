@@ -14,6 +14,17 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
+# Sentinel used so FakeClient can distinguish "explicitly None" from "not provided".
+_UNSET: Any = object()
+
+_DEFAULT_CREATE_COLUMN_RESULT: dict[str, Any] = {
+    "id": "text_abc123",
+    "title": "My Column",
+    "type": "text",
+    "description": None,
+    "settings_str": "{}",
+}
+
 
 class FakeClient:
     """Minimal fake of ``MondayGraphQLClient`` for command-level unit tests."""
@@ -30,6 +41,7 @@ class FakeClient:
         item_by_id: dict[str, Any] | None = None,
         move_result: Any = None,
         create_result: dict[str, Any] | None = None,
+        create_column_result: dict[str, Any] | None = _UNSET,
     ) -> None:
         self.board_items = board_items or []
         self.board_name = board_name
@@ -40,6 +52,13 @@ class FakeClient:
         self.item_by_id = item_by_id
         self.move_result = move_result
         self.create_result = create_result or {"id": "1", "name": "x", "created_at": "t"}
+        # Allow None to be passed explicitly (null API payload tests) while
+        # still defaulting to a sensible column dict when omitted.
+        self.create_column_result: dict[str, Any] | None = (
+            _DEFAULT_CREATE_COLUMN_RESULT
+            if create_column_result is _UNSET
+            else create_column_result
+        )
         self.queries: list[tuple[str, dict[str, Any] | None]] = []
         self.mutations: list[tuple[str, dict[str, Any] | None]] = []
 
@@ -78,6 +97,8 @@ class FakeClient:
             return {"move_item_to_group": self.move_result}
         if "create_item" in mutation:
             return {"create_item": self.create_result}
+        if "create_column" in mutation:
+            return {"create_column": self.create_column_result}
         raise AssertionError(f"Unexpected mutation dispatched:\n{mutation[:120]}")
 
 

@@ -187,6 +187,155 @@ def test_create_then_delete_removes_column(
     )
 
 
+# ---------------------------------------------------------------------------
+# columns update — issue #87 / AC1 + AC2 + AC3
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_update_column_title_is_verifiable_via_list(
+    test_board_id: str,
+    created_column: Callable[..., str],
+    run_id: str,
+) -> None:
+    """AC1: renaming a column's title is verifiable via columns list.
+
+    Creates a throwaway text column, updates its title via `columns update
+    --title`, then polls `columns list` to confirm the new title appears.
+    """
+    column_id = created_column("upd-title", "text")
+    new_title = f"{run_id}-renamed"
+
+    update_data = run_cli(
+        "columns",
+        "update",
+        "--board-id",
+        test_board_id,
+        "--column-id",
+        column_id,
+        "--title",
+        new_title,
+        is_mutation=True,
+    )
+    assert isinstance(update_data, dict)
+    assert update_data.get("title") == new_title
+    assert update_data.get("column_id") == column_id
+
+    # Verify the new title is visible in columns list (bounded poll for consistency).
+    from tests.integration.helpers import run_cli_until
+
+    after_data = run_cli_until(
+        lambda d: isinstance(d, dict)
+        and any(
+            c.get("column_id") == column_id and c.get("title") == new_title
+            for c in d.get("columns", [])
+        ),
+        "columns",
+        "list",
+        "--board-id",
+        test_board_id,
+    )
+    assert isinstance(after_data, dict)
+    col = next(
+        (c for c in after_data.get("columns", []) if c.get("column_id") == column_id),
+        None,
+    )
+    assert col is not None, f"Column {column_id} not found after title update"
+    assert col.get("title") == new_title, f"Expected title {new_title!r}, got {col.get('title')!r}"
+
+
+@pytest.mark.integration
+def test_add_label_to_status_column_is_verifiable(
+    test_board_id: str,
+    created_column: Callable[..., str],
+) -> None:
+    """AC2: --add-label adds a label to a status column, verifiable via columns list.
+
+    Creates a throwaway status column with initial labels, then adds 'Blocked'
+    via `columns update --add-label`, and confirms it appears in columns list.
+    Note: --add-label requires a board item to write to. Board 18422673411 has
+    pre-existing items, so this succeeds without creating a temporary item.
+    """
+    column_id = created_column("upd-label", "status", labels="Low,High")
+
+    update_data = run_cli(
+        "columns",
+        "update",
+        "--board-id",
+        test_board_id,
+        "--column-id",
+        column_id,
+        "--add-label",
+        "Blocked",
+        is_mutation=True,
+    )
+    assert isinstance(update_data, dict)
+    assert "labels_changed" in update_data
+    assert "Blocked" in update_data["labels_changed"].get("labels_added", [])
+
+    # Verify the new label appears in columns list (bounded poll for consistency).
+    from tests.integration.helpers import run_cli_until
+
+    after_data = run_cli_until(
+        lambda d: isinstance(d, dict)
+        and any(
+            c.get("column_id") == column_id
+            and any(lbl.get("label") == "Blocked" for lbl in c.get("labels", []))
+            for c in d.get("columns", [])
+        ),
+        "columns",
+        "list",
+        "--board-id",
+        test_board_id,
+    )
+    assert isinstance(after_data, dict)
+    col = next(
+        (c for c in after_data.get("columns", []) if c.get("column_id") == column_id),
+        None,
+    )
+    assert col is not None, f"Column {column_id} not found after add-label"
+    label_texts = [lbl.get("label") for lbl in col.get("labels", [])]
+    assert (
+        "Blocked" in label_texts
+    ), f"Expected 'Blocked' in labels after --add-label, got: {label_texts}"
+
+
+@pytest.mark.integration
+def test_rename_label_exits_1_with_clear_api_limitation_message(
+    test_board_id: str,
+    created_column: Callable[..., str],
+) -> None:
+    """AC3 (API-limited path): --rename-label exits 1 with a clear teaching error.
+
+    The Monday.com public API does not expose an index-preserving label rename.
+    This test asserts the command exits 1 with a message explaining the
+    limitation, so the contract is locked and any future change in behaviour
+    (e.g. if a rename path becomes available) is detected.
+    """
+    column_id = created_column("upd-rename", "status", labels="Todo,In Progress,Done")
+
+    result_raw, stderr = run_cli(
+        "columns",
+        "update",
+        "--board-id",
+        test_board_id,
+        "--column-id",
+        column_id,
+        "--rename-label",
+        "Todo=Pending",
+        expect_error=True,
+        capture_stderr=True,
+    )
+
+    # Command must exit 1 — not silently succeed.
+    # (run_cli with expect_error=True returns (stdout_str, stderr_str) on non-zero exit)
+    assert isinstance(stderr, str), "Expected string stderr when capture_stderr=True"
+    stderr_lower = stderr.lower()
+    assert (
+        "rename" in stderr_lower or "not supported" in stderr_lower
+    ), f"Expected rename-limitation message in stderr: {stderr!r}"
+
+
 @pytest.mark.integration
 def test_delete_unknown_column_id_exits_1(
     test_board_id: str,

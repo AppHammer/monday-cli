@@ -30,6 +30,19 @@ _DEFAULT_DELETE_COLUMN_RESULT: dict[str, Any] = {
 }
 
 
+_DEFAULT_CHANGE_COLUMN_TITLE_RESULT: dict[str, Any] = {
+    "id": "status_abc123",
+    "title": "New Title",
+    "type": "status",
+}
+
+_DEFAULT_CHANGE_COLUMN_VALUE_RESULT: dict[str, Any] = {
+    "id": "item_001",
+}
+
+_DEFAULT_FIRST_ITEM_ID = "item_001"
+
+
 class FakeClient:
     """Minimal fake of ``MondayGraphQLClient`` for command-level unit tests."""
 
@@ -47,6 +60,8 @@ class FakeClient:
         create_result: dict[str, Any] | None = None,
         create_column_result: dict[str, Any] | None = _UNSET,
         delete_column_result: dict[str, Any] | None = _UNSET,
+        change_column_title_result: dict[str, Any] | None = _UNSET,
+        first_item_id: str | None = _DEFAULT_FIRST_ITEM_ID,
     ) -> None:
         self.board_items = board_items or []
         self.board_name = board_name
@@ -69,6 +84,14 @@ class FakeClient:
             if delete_column_result is _UNSET
             else delete_column_result
         )
+        self.change_column_title_result: dict[str, Any] | None = (
+            _DEFAULT_CHANGE_COLUMN_TITLE_RESULT
+            if change_column_title_result is _UNSET
+            else change_column_title_result
+        )
+        # first_item_id: the id returned when GET_BOARD_FIRST_ITEM is queried.
+        # Set to None to simulate a board with no items (teaching error path).
+        self.first_item_id: str | None = first_item_id
         self.queries: list[tuple[str, dict[str, Any] | None]] = []
         self.mutations: list[tuple[str, dict[str, Any] | None]] = []
 
@@ -77,6 +100,20 @@ class FakeClient:
         if "next_items_page" in query:
             items, cursor = self.next_pages.pop(0)
             return {"next_items_page": {"cursor": cursor, "items": items}}
+        # GET_BOARD_FIRST_ITEM — dispatches on "items_page(limit: 1)" token which is
+        # more specific than the generic items_page branch below; check first.
+        if "items_page(limit: 1)" in query:
+            board_id = (variables or {}).get("boardIds", ["1"])[0]
+            items = [{"id": self.first_item_id}] if self.first_item_id else []
+            return {
+                "boards": [
+                    {
+                        "id": board_id,
+                        "name": self.board_name,
+                        "items_page": {"items": items},
+                    }
+                ]
+            }
         if "items_page" in query:
             board_id = (variables or {}).get("boardIds", ["1"])[0]
             return {
@@ -111,6 +148,11 @@ class FakeClient:
             return {"create_column": self.create_column_result}
         if "delete_column" in mutation:
             return {"delete_column": self.delete_column_result}
+        if "change_column_title" in mutation:
+            return {"change_column_title": self.change_column_title_result}
+        if "create_labels_if_missing" in mutation:
+            # CHANGE_COLUMN_VALUE_CREATE_LABELS — return a minimal item payload.
+            return {"change_column_value": _DEFAULT_CHANGE_COLUMN_VALUE_RESULT}
         raise AssertionError(f"Unexpected mutation dispatched:\n{mutation[:120]}")
 
 

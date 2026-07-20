@@ -12,8 +12,13 @@ from rich.console import Console
 from rich.table import Table
 
 from monday_cli.cli import columns_app, get_client
-from monday_cli.client.mutations import CREATE_COLUMN, DELETE_COLUMN
-from monday_cli.client.queries import GET_BOARD_COLUMNS
+from monday_cli.client.mutations import (
+    CHANGE_COLUMN_TITLE,
+    CHANGE_COLUMN_VALUE_CREATE_LABELS,
+    CREATE_COLUMN,
+    DELETE_COLUMN,
+)
+from monday_cli.client.queries import GET_BOARD_COLUMNS, GET_BOARD_FIRST_ITEM
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
 from monday_cli.utils.output import print_json, secho_err
 
@@ -33,6 +38,120 @@ _SUPPORTED_TYPES = {
     "doc",
     "checkbox",
 }
+
+
+def _apply_label_changes(
+    client: Any,
+    board_id: int,
+    column_id: str,
+    target_col: dict[str, Any],
+    add_labels: list[str],
+    rename_labels: list[str],
+) -> dict[str, Any]:
+    """Apply label changes (add / rename) to a status or dropdown column.
+
+    Returns a summary dict describing what was applied. Raises MondayAPIError,
+    typer.Exit (teaching errors), or any client exception to the caller.
+
+    add_labels:
+        For each label, fetch a board item and call CHANGE_COLUMN_VALUE_CREATE_LABELS
+        with create_labels_if_missing:true. Requires a board item to exist (teaching
+        error if none).
+
+    rename_labels:
+        Parse each entry as "old=new". Resolve "old" in the column's current label
+        set. The Monday API does NOT expose a public index-preserving rename path
+        (change_column_metadata only accepts title/description; change_column_value
+        only ADDS labels, not renames them). This function raises a MondayAPIError
+        with a clear message after validation so the caller surfaces a teaching error
+        rather than silently no-op. See .genesis/VERIFIED_FINDINGS.md for details.
+    """
+    applied: dict[str, Any] = {}
+
+    # --- parse and validate rename_label entries first (fast, no API) -------
+    parsed_renames: list[tuple[str, str]] = []
+    for entry in rename_labels:
+        if "=" not in entry:
+            secho_err(
+                f"Error: --rename-label '{entry}' is not in 'old=new' format.",
+                fg=typer.colors.RED,
+            )
+            secho_err(
+                "Example: --rename-label 'Stuck=Blocked'",
+                fg=typer.colors.BLUE,
+            )
+            raise typer.Exit(1)
+        old_label, _, new_label = entry.partition("=")
+        parsed_renames.append((old_label.strip(), new_label.strip()))
+
+    # --- resolve current labels for rename validation -----------------------
+    if parsed_renames:
+        current_labels = _parse_labels(target_col)
+        label_texts = [lbl["label"] for lbl in current_labels]
+        for old_label, new_label in parsed_renames:
+            matching = [lbl for lbl in current_labels if lbl["label"] == old_label]
+            if not matching:
+                secho_err(
+                    f"Error: Label '{old_label}' not found in column '{column_id}'.",
+                    fg=typer.colors.RED,
+                )
+                secho_err(
+                    f"Current labels: {', '.join(label_texts) or '(none)'}",
+                    fg=typer.colors.BLUE,
+                )
+                raise typer.Exit(1)
+
+        # The Monday.com public API does not expose an index-preserving label
+        # rename path. change_column_metadata only accepts title/description
+        # (ColumnProperty enum). change_column_value with create_labels_if_missing
+        # only ADDS labels, not renames them (verified live — VERIFIED_FINDINGS.md).
+        # Rather than silently no-op, surface a clear teaching error so the caller
+        # knows the limitation and can work around it (delete + re-add the label
+        # via the Monday.com UI, or recreate the column).
+        raise MondayAPIError(
+            "Rename-label is not supported: the Monday.com public API does not expose "
+            "an index-preserving label rename path. "
+            "To rename a label, use the Monday.com web UI. "
+            "Tip: create a new column with the desired labels or update them via the web UI."
+        )
+
+    # --- add labels ----------------------------------------------------------
+    if add_labels:
+        # Fetch a board item to write to (required by change_column_value).
+        item_result = client.execute_query(GET_BOARD_FIRST_ITEM, {"boardIds": [str(board_id)]})
+        boards = item_result.get("boards", [])
+        item_id: str | None = None
+        if boards:
+            items_page = boards[0].get("items_page", {})
+            items = items_page.get("items", [])
+            if items:
+                item_id = str(items[0]["id"])
+
+        if item_id is None:
+            secho_err(
+                f"Error: Board {board_id} has no items. --add-label requires at least one "
+                "board item to write to (Monday API limitation). "
+                "Create an item on the board first, then retry.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+
+        labels_added: list[str] = []
+        for label_text in add_labels:
+            client.execute_mutation(
+                CHANGE_COLUMN_VALUE_CREATE_LABELS,
+                {
+                    "boardId": str(board_id),
+                    "itemId": item_id,
+                    "columnId": column_id,
+                    "value": json.dumps({"label": label_text}),
+                },
+            )
+            labels_added.append(label_text)
+
+        applied["labels_added"] = labels_added
+
+    return applied
 
 
 def _build_defaults(column_type: str, labels: list[str]) -> str | None:
@@ -98,6 +217,113 @@ def _parse_labels(col: dict[str, Any]) -> list[dict[str, Any]]:
                 parsed.append({"index": entry.get("id"), "label": entry.get("name")})
         parsed.sort(key=lambda x: (x["index"] is None, x["index"]))
     return parsed
+
+
+@columns_app.command("update")
+def update_column(
+    board_id: int = typer.Option(..., "--board-id", "-b", help="ID of the board"),
+    column_id: str = typer.Option(..., "--column-id", "-c", help="ID of the column to update"),
+    title: str | None = typer.Option(None, "--title", "-t", help="New column title"),
+    add_label: list[str] = typer.Option(
+        [], "--add-label", help="Label to add (repeatable; status/dropdown columns only)"
+    ),
+    rename_label: list[str] = typer.Option(
+        [], "--rename-label", help="'old=new' rename (repeatable; status/dropdown only)"
+    ),
+) -> None:
+    """Rename a column and/or add/rename its status/dropdown labels.
+
+    At least one of --title, --add-label, or --rename-label must be provided.
+    --add-label and --rename-label only apply to status and dropdown columns.
+
+    Example:
+        monday columns update -b 123 -c status --title "State"
+        monday columns update -b 123 -c status --add-label "Blocked"
+        monday columns update -b 123 -c status --rename-label "Stuck=Blocked"
+    """
+    try:
+        if not title and not add_label and not rename_label:
+            secho_err(
+                "Error: Nothing to update. Pass --title, --add-label, or --rename-label.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+
+        client = get_client()
+
+        # Resolve the column + its type/current labels from the board schema.
+        board_result = client.execute_query(GET_BOARD_COLUMNS, {"boardIds": [str(board_id)]})
+        boards = board_result.get("boards", [])
+        if not boards:
+            secho_err(
+                f"Board {board_id} not found or you don't have access",
+                fg=typer.colors.YELLOW,
+            )
+            raise typer.Exit(1)
+
+        columns = boards[0].get("columns", [])
+        target = next((c for c in columns if c.get("id") == column_id), None)
+        if target is None:
+            secho_err(
+                f"Column '{column_id}' not found on board {board_id}.",
+                fg=typer.colors.YELLOW,
+            )
+            secho_err(
+                f"Tip: run 'monday columns list --board-id {board_id}' to see column ids.",
+                fg=typer.colors.BLUE,
+            )
+            raise typer.Exit(1)
+
+        col_type = target.get("type")
+        if (add_label or rename_label) and col_type not in _LABELLED_TYPES:
+            secho_err(
+                f"Error: --add-label/--rename-label apply only to status/dropdown columns "
+                f"(this column is type '{col_type}').",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+
+        applied: dict[str, Any] = {"column_id": column_id, "board_id": str(board_id)}
+
+        # 1) Title change.
+        if title:
+            client.execute_mutation(
+                CHANGE_COLUMN_TITLE,
+                {"boardId": str(board_id), "columnId": column_id, "title": title},
+            )
+            applied["title"] = title
+
+        # 2) Label add / rename.
+        if add_label or rename_label:
+            applied["labels_changed"] = _apply_label_changes(
+                client,
+                board_id,
+                column_id,
+                target,
+                list(add_label),
+                list(rename_label),
+            )
+
+        secho_err("✓ Column updated successfully!", fg=typer.colors.GREEN)
+        print_json(applied)
+
+    except AuthenticationError:
+        secho_err(
+            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    except RateLimitError as e:
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    except MondayAPIError as e:
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
 
 
 @columns_app.command("create")

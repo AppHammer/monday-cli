@@ -331,6 +331,25 @@ query GetNextItemsPage($cursor: String!, $limit: Int) {
 }
 """
 
+# Fetch the first item on a board (limit 1) to use as a target for
+# CHANGE_COLUMN_VALUE_CREATE_LABELS (label-add requires a real item to write to).
+GET_BOARD_FIRST_ITEM = """
+query GetBoardFirstItem($boardIds: [ID!]!) {
+  boards(ids: $boardIds) {
+    id
+    items_page(limit: 1) {
+      items {
+        id
+      }
+    }
+  }
+  complexity {
+    before
+    after
+  }
+}
+"""
+
 # Get workspaces
 GET_WORKSPACES = """
 query GetWorkspaces($limit: Int, $ids: [ID!], $membership_kind: WorkspaceMembershipKind) {

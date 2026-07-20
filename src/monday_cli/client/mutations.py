@@ -235,3 +235,30 @@ mutation DeleteColumn($boardId: ID!, $columnId: String!) {
   }
 }
 """
+
+# Add a label to an existing status/dropdown column by writing a label value
+# to a board item with create_labels_if_missing:true.
+#
+# VERIFIED live (see .genesis/VERIFIED_FINDINGS.md §"columns update label mechanisms"):
+#   - value must be JSON-stringified {"label": "<LabelText>"}
+#   - create_labels_if_missing:true causes Monday to add the label to the
+#     column's label set if it does not already exist (idempotent for existing
+#     labels); it also sets that item's cell to the written label (side-effect).
+#   - Requires a real board item to write to; fetch one with GET_BOARD_FIRST_ITEM.
+#
+# NOTE: do NOT alter CHANGE_COLUMN_VALUE — items/subitems depend on it as-is.
+CHANGE_COLUMN_VALUE_CREATE_LABELS = """
+mutation ChangeColumnValueCreateLabels(
+  $boardId: ID!, $itemId: ID!, $columnId: String!, $value: JSON!
+) {
+  change_column_value(
+    board_id: $boardId
+    item_id: $itemId
+    column_id: $columnId
+    value: $value
+    create_labels_if_missing: true
+  ) {
+    id
+  }
+}
+"""

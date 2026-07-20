@@ -148,16 +148,30 @@ def _swallow_not_found(
     last_exc: BaseException | None = None
     deleted = False
 
+    last_stderr = ""
     for attempt in range(1, max_attempts + 1):
         try:
-            last_output = run_cli(*args, expect_error=True)
+            raw = run_cli(*args, expect_error=True, capture_stderr=True)
+            # `run_cli(capture_stderr=True)` yields a (result, stderr) tuple; the
+            # unit-test fakes return a bare value -- accept either shape so this
+            # hardened helper works both live and under monkeypatch.
+            if isinstance(raw, tuple) and len(raw) == 2:
+                last_output, last_stderr = raw
+            else:
+                last_output, last_stderr = raw, ""
             last_exc = None
         except Exception as exc:  # pragma: no cover - defensive; teardown must not raise
             last_exc = exc
             last_output = None
+            last_stderr = ""
 
         if last_exc is None:
-            if isinstance(last_output, str) and "not found" in last_output.lower():
+            # FR-0008 routes the "not found" teaching message to STDERR, so an
+            # already-gone artifact leaves stdout empty -- check both streams so
+            # an idempotent re-delete of a column/group the test already removed
+            # is recognised as "already gone" rather than warned about spuriously.
+            combined = f"{last_output if isinstance(last_output, str) else ''}\n{last_stderr}"
+            if "not found" in combined.lower():
                 return  # Genuinely already gone -- expected, idempotent teardown.
             if not isinstance(last_output, str):
                 deleted = True  # `run_cli` returned parsed JSON -- delete exited 0.
@@ -308,6 +322,31 @@ def _group_absent(board_id: str, title: str) -> bool:
     return title not in {g.get("title") for g in data.get("groups", [])}
 
 
+def _column_absent(board_id: str, column_id: str) -> bool:
+    """Bounded-poll confirmation that a column `column_id` no longer exists.
+
+    Mirrors ``_group_absent``: ``columns delete`` reports its "not found"
+    teaching message on stderr (FR-0008), so ``_swallow_not_found`` -- which
+    only inspects stdout -- cannot distinguish an already-gone column (the
+    common case when a test deletes the column itself and the factory teardown
+    then re-deletes it) from a genuine failure, and would warn spuriously.
+    Supplying this as ``confirm_absent`` lets the teardown verify true absence
+    via a bounded ``columns list`` poll instead. Returns True once the column
+    id is gone; False if it is still present after the bounded poll.
+    """
+    data = run_cli_until(
+        lambda d: isinstance(d, dict)
+        and column_id not in {c.get("column_id") for c in d.get("columns", [])},
+        "columns",
+        "list",
+        "--board-id",
+        board_id,
+    )
+    if not isinstance(data, dict):
+        return False
+    return column_id not in {c.get("column_id") for c in data.get("columns", [])}
+
+
 def _run_backstop_sweep(board_id: str, phase: str) -> None:
     """List the test board and delete stale `it-*` items (age-guarded).
 
@@ -410,11 +449,12 @@ def created_column(test_board_id: str, run_id: str) -> Iterator[Callable[..., st
             other_id  = created_column("Priority", "status", labels="Low,High")
 
     Every column created through the factory is torn down via
-    ``columns delete --board-id <bid> --column-id <cid> --force`` — which
-    exists once issue #88 lands on this branch. Until then, the teardown call
-    is silently best-effort (``_swallow_not_found`` already tolerates any
-    outcome rather than raising, so the fixture is safe to use before #88 is
-    merged).
+    ``columns delete --board-id <bid> --column-id <cid> --force``. Teardown is
+    failure-safe: ``_swallow_not_found`` tolerates a column the test already
+    deleted (idempotent re-delete) rather than raising, and a ``confirm_absent``
+    poll (``_column_absent``) verifies genuine absence -- since the delete's
+    "not found" message goes to stderr (FR-0008), the stdout-only heuristic in
+    ``_swallow_not_found`` cannot confirm it alone.
     """
     records: list[tuple[str, str]] = []  # (board_id, column_id)
     counter = 0
@@ -455,6 +495,7 @@ def created_column(test_board_id: str, run_id: str) -> Iterator[Callable[..., st
             "--column-id",
             cid,
             "--force",
+            confirm_absent=lambda b=bid, c=cid: _column_absent(b, c),
         )
 
 

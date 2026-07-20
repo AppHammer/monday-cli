@@ -162,3 +162,76 @@ mutation DeleteItem($itemId: ID!) {
   }
 }
 """
+
+# Create a column (structure) on a board. `column_type` is a ColumnType enum value
+# passed as an unquoted enum; `defaults` is a JSON string that seeds status/dropdown
+# labels (validated by Monday against the column-type schema).
+CREATE_COLUMN = """
+mutation CreateColumn(
+  $boardId: ID!,
+  $title: String!,
+  $columnType: ColumnType!,
+  $defaults: JSON,
+  $description: String,
+  $columnId: String
+) {
+  create_column(
+    board_id: $boardId
+    title: $title
+    column_type: $columnType
+    defaults: $defaults
+    description: $description
+    id: $columnId
+  ) {
+    id
+    title
+    type
+    description
+    settings_str
+  }
+}
+"""
+
+# Rename a column.
+CHANGE_COLUMN_TITLE = """
+mutation ChangeColumnTitle($boardId: ID!, $columnId: String!, $title: String!) {
+  change_column_title(board_id: $boardId, column_id: $columnId, title: $title) {
+    id
+    title
+    type
+  }
+}
+"""
+
+# Change a column's title OR description (ColumnProperty is `title` | `description`).
+# NOTE: this mutation does NOT add status/dropdown labels — see the Gotchas section.
+CHANGE_COLUMN_METADATA = """
+mutation ChangeColumnMetadata(
+  $boardId: ID!,
+  $columnId: String!,
+  $columnProperty: ColumnProperty!,
+  $value: String!
+) {
+  change_column_metadata(
+    board_id: $boardId
+    column_id: $columnId
+    column_property: $columnProperty
+    value: $value
+  ) {
+    id
+    title
+    description
+    type
+    settings_str
+  }
+}
+"""
+
+# Delete a column (destructive — removes the column and all its cell data).
+DELETE_COLUMN = """
+mutation DeleteColumn($boardId: ID!, $columnId: String!) {
+  delete_column(board_id: $boardId, column_id: $columnId) {
+    id
+  }
+}
+"""

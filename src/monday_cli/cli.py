@@ -23,6 +23,7 @@ subitems_app = typer.Typer(help="Manage Monday.com subitems")
 statuses_app = typer.Typer(help="Manage Monday.com status columns")
 updates_app = typer.Typer(help="Manage Monday.com updates")
 docs_app = typer.Typer(help="Manage Monday.com documents")
+columns_app = typer.Typer(help="Manage Monday.com board columns (structure)")
 
 app.add_typer(workspaces_app, name="workspaces")
 app.add_typer(boards_app, name="boards")
@@ -32,6 +33,7 @@ app.add_typer(subitems_app, name="subitems")
 app.add_typer(statuses_app, name="statuses")
 app.add_typer(updates_app, name="updates")
 app.add_typer(docs_app, name="docs")
+app.add_typer(columns_app, name="columns")
 
 # Global state
 _client: MondayGraphQLClient | None = None
@@ -119,6 +121,7 @@ if __name__ == "__main__":
 # Import command modules to register commands (after all functions are defined)
 from monday_cli.commands import (  # noqa: F401, E402
     boards,
+    columns,
     docs,
     groups,
     guide,

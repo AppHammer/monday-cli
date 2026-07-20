@@ -31,6 +31,7 @@ This is a scratch board for automated/integration tests that exercise the CLI ag
 5. If you encounter a bug, issue or enhancement while working on a task, create a new task in monday on the backlog for it. We don't code anything without a monday task!
 6. As you complete phases update the status of the monday task, "Working on it", "Review", "Ready to Merge", etc. Post updated as needed.
 7. When possible parallelize your work and invoke subagents.
+8. when you deploy a version using a tag, first make sure README.md, CLAUDE.md and `monday guide` all reflect the current functionality. 
 
 ## Common Commands
 

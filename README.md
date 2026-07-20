@@ -39,12 +39,12 @@ monday skill.md > SKILL.md
 - **Workspace Management**: List and filter workspaces with membership filtering
 - **Board Management**: List boards with state filtering (active, archived, deleted) and workspace filtering
 - **Group Management**: List, create, and delete groups on boards
-- **Item Management**: Full CRUD operations - get, create, update, list items with pagination and filtering
-- **Subitem Operations**: Create, list, get, and update subitems with full column support
+- **Item Management**: Full CRUD operations - get, create, update, list, move, and delete items with pagination and filtering
+- **Subitem Operations**: Create, list, get, update, and delete subitems with full column support
 - **Status Management**: List available statuses and update item/subitem statuses using human-readable labels
-- **Column Discovery**: List all board columns with their IDs, types, and available options
-- **Updates**: Post updates to items and subitems
-- **Document Management**: Create and read documents in Monday.com doc columns
+- **Column Discovery & Management**: List board columns with their IDs, types, and options — and create, update (rename / add / rename labels), and delete columns to fully provision a board from the CLI
+- **Updates**: Post and read updates on items and subitems
+- **Document Management**: Read (`get`), replace (`put`), append to (`append`), and clear doc-column documents in Monday.com
 - **Pagination Support**: Cursor-based pagination for items and subitems with configurable page sizes
 - **Table Output**: Rich table formatting option for all list commands
 - **Production Ready**: Includes retry logic, rate limiting, and comprehensive error handling
@@ -334,6 +334,27 @@ monday items update --item-id 1234567890 --title "Github Issue Link" --value "ht
 monday items update --item-id 1234567890 --title "Due Date" --value "2024-12-31"
 ```
 
+**Move an item to another group:**
+```bash
+monday items move --item-id <ITEM_ID> --group <GROUP> [OPTIONS]
+
+Options:
+  -i, --item-id INT  Item ID (required)
+  -g, --group TEXT   Destination group TITLE or id (auto-detected)
+  --group-id TEXT    Destination group id (id-only, long option)
+```
+
+Accepts a group title or id via `-g/--group` (auto-detected); use `--group-id` to force id-only. It is a safe no-op when the item is already in the target group.
+
+Examples:
+```bash
+# Move by group title
+monday items move --item-id 1234567890 --group "Done"
+
+# Move by group id
+monday items move --item-id 1234567890 --group-id "topics"
+```
+
 **List all board columns:**
 ```bash
 monday items list-columns --item-id <ITEM_ID>
@@ -347,6 +368,20 @@ This command shows all columns on the item's board with their IDs, types, and av
 Example:
 ```bash
 monday items list-columns --item-id 1234567890
+```
+
+**Delete an item:**
+```bash
+monday items delete --item-id <ITEM_ID> [OPTIONS]
+
+Options:
+  -i, --item-id INT  Item ID (required)
+  -f, --force        Skip confirmation prompt
+```
+
+Example:
+```bash
+monday items delete --item-id 1234567890 --force
 ```
 
 #### Statuses
@@ -369,6 +404,86 @@ monday statuses list --board-id 1234567890
 
 # Table output
 monday statuses list --board-id 1234567890 --table
+```
+
+#### Columns
+
+Manage a board's column **structure** (not just cell values) — list, create, rename/relabel, and delete columns so a board can be fully provisioned from the CLI.
+
+**List columns:**
+```bash
+monday columns list --board-id <BOARD_ID> [OPTIONS]
+
+Options:
+  -b, --board-id INT  Board ID (required)
+  -t, --table         Output as table instead of JSON
+```
+
+Lists every column with its id, title, type, and (for status/dropdown) its label set.
+
+**Create a column:**
+```bash
+monday columns create --board-id <BOARD_ID> --title <TITLE> --type <TYPE> [OPTIONS]
+
+Options:
+  -b, --board-id INT   Board ID (required)
+  -t, --title TEXT     Title of the new column (required)
+  --type TEXT          Monday column type, e.g. status, dropdown, text, long_text,
+                       numbers, date, people, link, checkbox (required)
+  --labels TEXT        Comma-separated labels for status/dropdown columns
+  --column-id TEXT     Custom column id (1-20 chars, a-z/_; must be unique on board)
+  --description TEXT   Column description
+```
+
+Examples:
+```bash
+# A plain text column
+monday columns create --board-id 1234567890 --title "Notes" --type text
+
+# A status column seeded with labels
+monday columns create --board-id 1234567890 --title "Stage" --type status \
+  --labels "Backlog,Working on it,Done"
+```
+
+**Update a column (rename / add / rename labels):**
+```bash
+monday columns update --board-id <BOARD_ID> --column-id <COLUMN_ID> [OPTIONS]
+
+Options:
+  -b, --board-id INT       Board ID (required)
+  -c, --column-id TEXT     ID of the column to update (required)
+  -t, --title TEXT         New column title
+  --add-label TEXT         Label to add (repeatable; status/dropdown columns only)
+  --rename-label TEXT      'old=new' rename (repeatable; status/dropdown only)
+```
+
+Examples:
+```bash
+# Rename the column
+monday columns update --board-id 1234567890 --column-id status --title "Stage"
+
+# Add labels to a status/dropdown column
+monday columns update --board-id 1234567890 --column-id status \
+  --add-label "Blocked" --add-label "In Review"
+
+# Rename an existing label
+monday columns update --board-id 1234567890 --column-id status \
+  --rename-label "Working on it=In Progress"
+```
+
+**Delete a column:**
+```bash
+monday columns delete --board-id <BOARD_ID> --column-id <COLUMN_ID> [OPTIONS]
+
+Options:
+  -b, --board-id INT     Board ID (required)
+  -c, --column-id TEXT   ID of the column to delete (required)
+  -f, --force            Skip confirmation prompt
+```
+
+Example:
+```bash
+monday columns delete --board-id 1234567890 --column-id notes --force
 ```
 
 #### Subitems
@@ -482,6 +597,20 @@ Example:
 monday subitems list-statuses --subitem-id 9999999999
 ```
 
+**Delete a subitem:**
+```bash
+monday subitems delete --subitem-id <SUBITEM_ID> [OPTIONS]
+
+Options:
+  -s, --subitem-id INT  Subitem ID (required)
+  -f, --force           Skip confirmation prompt
+```
+
+Example:
+```bash
+monday subitems delete --subitem-id 9999999999 --force
+```
+
 #### Updates
 
 **Create an update:**
@@ -502,25 +631,41 @@ monday updates create --item-id 1234567890 --body "Work in progress"
 monday updates create --item-id 9999999999 --body "Completed subtask"
 ```
 
-#### Docs
-
-**Create a document in a doc column:**
+**Get updates on an item:**
 ```bash
-monday docs create --item-id <ITEM_ID> --column-name <COLUMN_NAME> [OPTIONS]
+monday updates get --item-id <ITEM_ID>
 
 Options:
-  -i, --item-id TEXT      Item ID (required)
-  -n, --column-name TEXT  Doc column name (required)
-  -c, --content TEXT      Initial text content for the document (optional)
+  -i, --item-id INT  Item ID (required)
 ```
+
+Returns the item's updates (including replies) as JSON.
+
+Example:
+```bash
+monday updates get --item-id 1234567890
+```
+
+#### Docs
+
+**Write / replace document content:**
+```bash
+monday docs put --item-id <ITEM_ID> --column-name <COLUMN_NAME> --content <MARKDOWN>
+
+Options:
+  -i, --item-id INT       Item ID (required)
+  -n, --column-name TEXT  Doc column name (required)
+  -c, --content TEXT      Markdown content to write to the document (required)
+```
+
+`docs put` replaces the document's content with the supplied Markdown, creating the document on first write. (It supersedes the earlier `docs create` command.)
 
 Examples:
 ```bash
-# Create empty document
-monday docs create --item-id 1234567890 --column-name "Monday Doc"
+# Write (or overwrite) a document with Markdown
+monday docs put --item-id 1234567890 --column-name "Monday Doc" --content "# Notes
 
-# Create document with initial content
-monday docs create --item-id 1234567890 --column-name "Notes" --content "Meeting notes here"
+Kickoff summary."
 ```
 
 **Get document content:**
@@ -570,6 +715,41 @@ Example (human-readable Markdown):
 monday docs get --item-id 1234567890 --column-name "Monday Doc" --raw
 # or equivalently:
 monday docs get --item-id 1234567890 --column-name "Monday Doc" --markdown
+```
+
+**Append to a document:**
+```bash
+monday docs append --item-id <ITEM_ID> --column-name <COLUMN_NAME> --content <MARKDOWN>
+
+Options:
+  -i, --item-id INT       Item ID (required)
+  -n, --column-name TEXT  Doc column name (required)
+  -c, --content TEXT      Markdown content to append to the document (required)
+```
+
+Example:
+```bash
+monday docs append --item-id 1234567890 --column-name "Monday Doc" --content "
+
+## Follow-up
+Next steps here."
+```
+
+**Clear a document:**
+```bash
+monday docs clear --item-id <ITEM_ID> --column-name <COLUMN_NAME> [OPTIONS]
+
+Options:
+  -i, --item-id INT       Item ID (required)
+  -n, --column-name TEXT  Doc column name to clear (required)
+  -f, --force             Skip confirmation prompt
+```
+
+Resets a doc column to empty, including corrupted / unresolvable cells.
+
+Example:
+```bash
+monday docs clear --item-id 1234567890 --column-name "Monday Doc" --force
 ```
 
 ### Other Commands

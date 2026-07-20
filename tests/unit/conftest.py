@@ -14,6 +14,34 @@ from typing import Any
 import pytest
 from typer.testing import CliRunner
 
+# Sentinel used so FakeClient can distinguish "explicitly None" from "not provided".
+_UNSET: Any = object()
+
+_DEFAULT_CREATE_COLUMN_RESULT: dict[str, Any] = {
+    "id": "text_abc123",
+    "title": "My Column",
+    "type": "text",
+    "description": None,
+    "settings_str": "{}",
+}
+
+_DEFAULT_DELETE_COLUMN_RESULT: dict[str, Any] = {
+    "id": "status_abc123",
+}
+
+
+_DEFAULT_CHANGE_COLUMN_TITLE_RESULT: dict[str, Any] = {
+    "id": "status_abc123",
+    "title": "New Title",
+    "type": "status",
+}
+
+_DEFAULT_CHANGE_COLUMN_VALUE_RESULT: dict[str, Any] = {
+    "id": "item_001",
+}
+
+_DEFAULT_FIRST_ITEM_ID = "item_001"
+
 
 class FakeClient:
     """Minimal fake of ``MondayGraphQLClient`` for command-level unit tests."""
@@ -30,6 +58,11 @@ class FakeClient:
         item_by_id: dict[str, Any] | None = None,
         move_result: Any = None,
         create_result: dict[str, Any] | None = None,
+        create_column_result: dict[str, Any] | None = _UNSET,
+        delete_column_result: dict[str, Any] | None = _UNSET,
+        change_column_title_result: dict[str, Any] | None = _UNSET,
+        first_item_id: str | None = _DEFAULT_FIRST_ITEM_ID,
+        first_item_column_values: list[dict[str, Any]] | None = None,
     ) -> None:
         self.board_items = board_items or []
         self.board_name = board_name
@@ -40,6 +73,30 @@ class FakeClient:
         self.item_by_id = item_by_id
         self.move_result = move_result
         self.create_result = create_result or {"id": "1", "name": "x", "created_at": "t"}
+        # Allow None to be passed explicitly (null API payload tests) while
+        # still defaulting to a sensible column dict when omitted.
+        self.create_column_result: dict[str, Any] | None = (
+            _DEFAULT_CREATE_COLUMN_RESULT
+            if create_column_result is _UNSET
+            else create_column_result
+        )
+        self.delete_column_result: dict[str, Any] | None = (
+            _DEFAULT_DELETE_COLUMN_RESULT
+            if delete_column_result is _UNSET
+            else delete_column_result
+        )
+        self.change_column_title_result: dict[str, Any] | None = (
+            _DEFAULT_CHANGE_COLUMN_TITLE_RESULT
+            if change_column_title_result is _UNSET
+            else change_column_title_result
+        )
+        # first_item_id: the id returned when GET_BOARD_FIRST_ITEM is queried.
+        # Set to None to simulate a board with no items (teaching error path).
+        self.first_item_id: str | None = first_item_id
+        # first_item_column_values: the column_values list included in the
+        # GET_BOARD_FIRST_ITEM response (Fix 1 — restore prior value after add-label).
+        # Each entry is {"id": "<col_id>", "value": "<raw_json_or_null>"}.
+        self.first_item_column_values: list[dict[str, Any]] = first_item_column_values or []
         self.queries: list[tuple[str, dict[str, Any] | None]] = []
         self.mutations: list[tuple[str, dict[str, Any] | None]] = []
 
@@ -48,6 +105,24 @@ class FakeClient:
         if "next_items_page" in query:
             items, cursor = self.next_pages.pop(0)
             return {"next_items_page": {"cursor": cursor, "items": items}}
+        # GET_BOARD_FIRST_ITEM — dispatches on "items_page(limit: 1)" token which is
+        # more specific than the generic items_page branch below; check first.
+        if "items_page(limit: 1)" in query:
+            board_id = (variables or {}).get("boardIds", ["1"])[0]
+            items = (
+                [{"id": self.first_item_id, "column_values": self.first_item_column_values}]
+                if self.first_item_id
+                else []
+            )
+            return {
+                "boards": [
+                    {
+                        "id": board_id,
+                        "name": self.board_name,
+                        "items_page": {"items": items},
+                    }
+                ]
+            }
         if "items_page" in query:
             board_id = (variables or {}).get("boardIds", ["1"])[0]
             return {
@@ -78,6 +153,19 @@ class FakeClient:
             return {"move_item_to_group": self.move_result}
         if "create_item" in mutation:
             return {"create_item": self.create_result}
+        if "create_column" in mutation:
+            return {"create_column": self.create_column_result}
+        if "delete_column" in mutation:
+            return {"delete_column": self.delete_column_result}
+        if "change_column_title" in mutation:
+            return {"change_column_title": self.change_column_title_result}
+        if "create_labels_if_missing" in mutation:
+            # CHANGE_COLUMN_VALUE_CREATE_LABELS — return a minimal item payload.
+            return {"change_column_value": _DEFAULT_CHANGE_COLUMN_VALUE_RESULT}
+        if "change_column_value" in mutation:
+            # Plain CHANGE_COLUMN_VALUE (used for restoring the prior cell value after
+            # add-label side-effect — Fix 1).
+            return {"change_column_value": _DEFAULT_CHANGE_COLUMN_VALUE_RESULT}
         raise AssertionError(f"Unexpected mutation dispatched:\n{mutation[:120]}")
 
 

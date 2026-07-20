@@ -162,3 +162,103 @@ mutation DeleteItem($itemId: ID!) {
   }
 }
 """
+
+# Create a column (structure) on a board. `column_type` is a ColumnType enum value
+# passed as an unquoted enum; `defaults` is a JSON string that seeds status/dropdown
+# labels (validated by Monday against the column-type schema).
+CREATE_COLUMN = """
+mutation CreateColumn(
+  $boardId: ID!,
+  $title: String!,
+  $columnType: ColumnType!,
+  $defaults: JSON,
+  $description: String,
+  $columnId: String
+) {
+  create_column(
+    board_id: $boardId
+    title: $title
+    column_type: $columnType
+    defaults: $defaults
+    description: $description
+    id: $columnId
+  ) {
+    id
+    title
+    type
+    description
+    settings_str
+  }
+}
+"""
+
+# Rename a column.
+CHANGE_COLUMN_TITLE = """
+mutation ChangeColumnTitle($boardId: ID!, $columnId: String!, $title: String!) {
+  change_column_title(board_id: $boardId, column_id: $columnId, title: $title) {
+    id
+    title
+    type
+  }
+}
+"""
+
+# Change a column's title OR description (ColumnProperty is `title` | `description`).
+# NOTE: this mutation does NOT add status/dropdown labels — see the Gotchas section.
+CHANGE_COLUMN_METADATA = """
+mutation ChangeColumnMetadata(
+  $boardId: ID!,
+  $columnId: String!,
+  $columnProperty: ColumnProperty!,
+  $value: String!
+) {
+  change_column_metadata(
+    board_id: $boardId
+    column_id: $columnId
+    column_property: $columnProperty
+    value: $value
+  ) {
+    id
+    title
+    description
+    type
+    settings_str
+  }
+}
+"""
+
+# Delete a column (destructive — removes the column and all its cell data).
+DELETE_COLUMN = """
+mutation DeleteColumn($boardId: ID!, $columnId: String!) {
+  delete_column(board_id: $boardId, column_id: $columnId) {
+    id
+  }
+}
+"""
+
+# Add a label to an existing status/dropdown column by writing a label value
+# to a board item with create_labels_if_missing:true.
+#
+# VERIFIED live (see .genesis/VERIFIED_FINDINGS.md §"columns update label mechanisms"):
+#   - value must be JSON-stringified {"label": "<LabelText>"}
+#   - create_labels_if_missing:true causes Monday to add the label to the
+#     column's label set if it does not already exist (idempotent for existing
+#     labels); it also sets that item's cell to the written label (side-effect).
+#   - Requires a real board item to write to; fetch one with GET_BOARD_FIRST_ITEM.
+#
+# NOTE: do NOT alter CHANGE_COLUMN_VALUE — items/subitems depend on it as-is.
+CHANGE_COLUMN_VALUE_CREATE_LABELS = """
+mutation ChangeColumnValueCreateLabels(
+  $boardId: ID!, $itemId: ID!, $columnId: String!, $value: JSON!
+) {
+  change_column_value(
+    board_id: $boardId
+    item_id: $itemId
+    column_id: $columnId
+    value: $value
+    create_labels_if_missing: true
+  ) {
+    id
+  }
+}
+"""

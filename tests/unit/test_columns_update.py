@@ -499,3 +499,97 @@ def test_title_and_add_label_together(runner: CliRunner, monkeypatch: pytest.Mon
     data = json.loads(result.stdout.strip())
     assert data["title"] == "State"
     assert "labels_changed" in data
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 (code-review suggestion): --add-label restore of the item's prior value
+# ---------------------------------------------------------------------------
+
+
+def test_add_label_restores_prior_item_cell_value(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fix 1: after --add-label writes to an item's cell, a restore mutation is called.
+
+    The CHANGE_COLUMN_VALUE_CREATE_LABELS write has a side-effect of assigning
+    the new label to the target item's cell. After writing, the command must
+    call CHANGE_COLUMN_VALUE with the cell's prior value to undo that side-effect.
+    """
+    prior_value = json.dumps({"index": 0, "post_id": None})
+    client = _make_client(
+        first_item_id="item_77",
+        first_item_column_values=[{"id": _STATUS_COL_ID, "value": prior_value}],
+    )
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(
+        app,
+        [
+            "columns",
+            "update",
+            "--board-id",
+            _BOARD_ID,
+            "--column-id",
+            _STATUS_COL_ID,
+            "--add-label",
+            "Blocked",
+        ],
+    )
+
+    assert result.exit_code == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+
+    # One label-add mutation followed by one restore mutation (CHANGE_COLUMN_VALUE).
+    label_mutations = [(s, v) for s, v in client.mutations if "create_labels_if_missing" in s]
+    restore_mutations = [
+        (s, v)
+        for s, v in client.mutations
+        if "change_column_value" in s and "create_labels_if_missing" not in s
+    ]
+    assert len(label_mutations) == 1, "expected exactly one label-add mutation"
+    assert len(restore_mutations) >= 1, "expected at least one restore mutation after add-label"
+
+    # Restore must write the prior value back to the same item+column.
+    _restore_str, restore_vars = restore_mutations[0]
+    assert restore_vars is not None
+    assert restore_vars["itemId"] == "item_77"
+    assert restore_vars["columnId"] == _STATUS_COL_ID
+    assert restore_vars["value"] == prior_value
+
+
+def test_add_label_with_empty_prior_value_restores_null(
+    runner: CliRunner, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fix 1: when the item's cell has no prior value (None), restore writes 'null'."""
+    # No column_values entry for this column → prior_value is None → restore sends "null".
+    client = _make_client(
+        first_item_id="item_88",
+        first_item_column_values=[],  # column not in column_values — cell is empty
+    )
+    _patch_client(monkeypatch, client)
+
+    result = runner.invoke(
+        app,
+        [
+            "columns",
+            "update",
+            "--board-id",
+            _BOARD_ID,
+            "--column-id",
+            _STATUS_COL_ID,
+            "--add-label",
+            "NewTag",
+        ],
+    )
+
+    assert result.exit_code == 0, f"stderr: {result.stderr}\nstdout: {result.stdout}"
+
+    restore_mutations = [
+        (s, v)
+        for s, v in client.mutations
+        if "change_column_value" in s and "create_labels_if_missing" not in s
+    ]
+    assert len(restore_mutations) >= 1, "expected a restore mutation even when prior value is None"
+    _restore_str, restore_vars = restore_mutations[0]
+    assert restore_vars is not None
+    # When prior_value is None we pass "null" as the restore value.
+    assert restore_vars["value"] == "null"

@@ -62,6 +62,7 @@ class FakeClient:
         delete_column_result: dict[str, Any] | None = _UNSET,
         change_column_title_result: dict[str, Any] | None = _UNSET,
         first_item_id: str | None = _DEFAULT_FIRST_ITEM_ID,
+        first_item_column_values: list[dict[str, Any]] | None = None,
     ) -> None:
         self.board_items = board_items or []
         self.board_name = board_name
@@ -92,6 +93,10 @@ class FakeClient:
         # first_item_id: the id returned when GET_BOARD_FIRST_ITEM is queried.
         # Set to None to simulate a board with no items (teaching error path).
         self.first_item_id: str | None = first_item_id
+        # first_item_column_values: the column_values list included in the
+        # GET_BOARD_FIRST_ITEM response (Fix 1 — restore prior value after add-label).
+        # Each entry is {"id": "<col_id>", "value": "<raw_json_or_null>"}.
+        self.first_item_column_values: list[dict[str, Any]] = first_item_column_values or []
         self.queries: list[tuple[str, dict[str, Any] | None]] = []
         self.mutations: list[tuple[str, dict[str, Any] | None]] = []
 
@@ -104,7 +109,11 @@ class FakeClient:
         # more specific than the generic items_page branch below; check first.
         if "items_page(limit: 1)" in query:
             board_id = (variables or {}).get("boardIds", ["1"])[0]
-            items = [{"id": self.first_item_id}] if self.first_item_id else []
+            items = (
+                [{"id": self.first_item_id, "column_values": self.first_item_column_values}]
+                if self.first_item_id
+                else []
+            )
             return {
                 "boards": [
                     {
@@ -152,6 +161,10 @@ class FakeClient:
             return {"change_column_title": self.change_column_title_result}
         if "create_labels_if_missing" in mutation:
             # CHANGE_COLUMN_VALUE_CREATE_LABELS — return a minimal item payload.
+            return {"change_column_value": _DEFAULT_CHANGE_COLUMN_VALUE_RESULT}
+        if "change_column_value" in mutation:
+            # Plain CHANGE_COLUMN_VALUE (used for restoring the prior cell value after
+            # add-label side-effect — Fix 1).
             return {"change_column_value": _DEFAULT_CHANGE_COLUMN_VALUE_RESULT}
         raise AssertionError(f"Unexpected mutation dispatched:\n{mutation[:120]}")
 

@@ -376,3 +376,68 @@ def test_type_is_lower_cased(monkeypatch: pytest.MonkeyPatch) -> None:
     _mutation_str, variables = client.mutations[0]
     assert variables is not None
     assert variables["columnType"] == "date"
+
+
+# ---------------------------------------------------------------------------
+# Fix 4 (code-review nit): no --labels on a labelled type → _build_defaults
+# returns None; no defaults variable in the mutation call.
+# ---------------------------------------------------------------------------
+
+
+def test_status_without_labels_sends_no_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fix 4: creating a status column WITHOUT --labels sends no defaults variable."""
+    client = _use(
+        monkeypatch,
+        _make_client(col_id="color_nolabels", title="State", col_type="status"),
+    )
+
+    result = _invoke(
+        "columns",
+        "create",
+        "--board-id",
+        "5",
+        "--title",
+        "State",
+        "--type",
+        "status",
+        # intentionally NO --labels flag
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(client.mutations) == 1
+    _mutation_str, variables = client.mutations[0]
+    assert variables is not None
+    assert variables["columnType"] == "status"
+    # _build_defaults returns None when no labels are passed → key must be absent.
+    assert (
+        "defaults" not in variables
+    ), "status column with no labels must not include 'defaults' in the mutation call"
+
+
+def test_dropdown_without_labels_sends_no_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fix 4: creating a dropdown column WITHOUT --labels sends no defaults variable."""
+    client = _use(
+        monkeypatch,
+        _make_client(col_id="dropdown_nolabels", title="Category", col_type="dropdown"),
+    )
+
+    result = _invoke(
+        "columns",
+        "create",
+        "--board-id",
+        "6",
+        "--title",
+        "Category",
+        "--type",
+        "dropdown",
+        # intentionally NO --labels flag
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(client.mutations) == 1
+    _mutation_str, variables = client.mutations[0]
+    assert variables is not None
+    assert variables["columnType"] == "dropdown"
+    assert (
+        "defaults" not in variables
+    ), "dropdown column with no labels must not include 'defaults' in the mutation call"

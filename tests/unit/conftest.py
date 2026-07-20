@@ -25,6 +25,10 @@ _DEFAULT_CREATE_COLUMN_RESULT: dict[str, Any] = {
     "settings_str": "{}",
 }
 
+_DEFAULT_DELETE_COLUMN_RESULT: dict[str, Any] = {
+    "id": "status_abc123",
+}
+
 
 class FakeClient:
     """Minimal fake of ``MondayGraphQLClient`` for command-level unit tests."""
@@ -42,6 +46,7 @@ class FakeClient:
         move_result: Any = None,
         create_result: dict[str, Any] | None = None,
         create_column_result: dict[str, Any] | None = _UNSET,
+        delete_column_result: dict[str, Any] | None = _UNSET,
     ) -> None:
         self.board_items = board_items or []
         self.board_name = board_name
@@ -58,6 +63,11 @@ class FakeClient:
             _DEFAULT_CREATE_COLUMN_RESULT
             if create_column_result is _UNSET
             else create_column_result
+        )
+        self.delete_column_result: dict[str, Any] | None = (
+            _DEFAULT_DELETE_COLUMN_RESULT
+            if delete_column_result is _UNSET
+            else delete_column_result
         )
         self.queries: list[tuple[str, dict[str, Any] | None]] = []
         self.mutations: list[tuple[str, dict[str, Any] | None]] = []
@@ -99,6 +109,8 @@ class FakeClient:
             return {"create_item": self.create_result}
         if "create_column" in mutation:
             return {"create_column": self.create_column_result}
+        if "delete_column" in mutation:
+            return {"delete_column": self.delete_column_result}
         raise AssertionError(f"Unexpected mutation dispatched:\n{mutation[:120]}")
 
 

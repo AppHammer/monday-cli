@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from monday_cli.cli import columns_app, get_client
-from monday_cli.client.mutations import CREATE_COLUMN
+from monday_cli.client.mutations import CREATE_COLUMN, DELETE_COLUMN
 from monday_cli.client.queries import GET_BOARD_COLUMNS
 from monday_cli.utils.error_handler import AuthenticationError, MondayAPIError, RateLimitError
 from monday_cli.utils.output import print_json, secho_err
@@ -279,6 +279,103 @@ def list_columns(
                     "total_count": len(columns),
                 }
             )
+
+    except AuthenticationError:
+        secho_err(
+            "Error: Invalid API token. Set MONDAY_API_TOKEN environment variable.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
+    except RateLimitError as e:
+        secho_err(f"Error: {str(e)}", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    except MondayAPIError as e:
+        secho_err(f"API Error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        secho_err(f"Unexpected error: {str(e)}", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
+
+@columns_app.command("delete")
+def delete_column(
+    board_id: int = typer.Option(..., "--board-id", "-b", help="ID of the board"),
+    column_id: str = typer.Option(..., "--column-id", "-c", help="ID of the column to delete"),
+    force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation prompt"),
+) -> None:
+    """Delete a column from a board (removes the column and all its data).
+
+    WARNING: This action cannot be undone!
+
+    By default, a confirmation prompt is shown before deletion. Use --force
+    to skip the prompt (useful for automation scripts).
+
+    Example:
+        monday columns delete --board-id 123 --column-id status
+        monday columns delete --board-id 123 --column-id status --force
+    """
+    try:
+        client = get_client()
+
+        # Validate the column exists before prompting or deleting (AC4).
+        board_result = client.execute_query(GET_BOARD_COLUMNS, {"boardIds": [str(board_id)]})
+        boards = board_result.get("boards", [])
+        if not boards:
+            secho_err(
+                f"Board {board_id} not found or you don't have access",
+                fg=typer.colors.YELLOW,
+            )
+            raise typer.Exit(1)
+
+        columns = boards[0].get("columns", [])
+        target = next((c for c in columns if c.get("id") == column_id), None)
+        if target is None:
+            secho_err(
+                f"Column '{column_id}' not found on board {board_id}.",
+                fg=typer.colors.YELLOW,
+            )
+            secho_err(
+                f"Tip: run 'monday columns list --board-id {board_id}' to see column ids.",
+                fg=typer.colors.BLUE,
+            )
+            raise typer.Exit(1)
+
+        col_title = target.get("title", column_id)
+
+        if not force:
+            secho_err(
+                f"WARNING: This will delete column '{col_title}' ({column_id})"
+                f" and all its data from board {board_id}!",
+                fg=typer.colors.YELLOW,
+            )
+            secho_err("This action cannot be undone.", fg=typer.colors.RED)
+            confirm_delete = typer.confirm("Are you sure you want to continue?", err=True)
+            if not confirm_delete:
+                secho_err("Delete cancelled.", fg=typer.colors.BLUE)
+                raise typer.Exit(0)
+
+        result = client.execute_mutation(
+            DELETE_COLUMN, {"boardId": str(board_id), "columnId": column_id}
+        )
+        deleted = result.get("delete_column")
+        if not deleted or not deleted.get("id"):
+            secho_err(
+                "Error: Failed to delete column. No data returned from API.",
+                fg=typer.colors.RED,
+            )
+            raise typer.Exit(1)
+
+        secho_err(f"✓ Column '{col_title}' deleted successfully!", fg=typer.colors.GREEN)
+        print_json(
+            {
+                "column_id": deleted.get("id"),
+                "title": col_title,
+                "deleted": True,
+                "board_id": str(board_id),
+            }
+        )
 
     except AuthenticationError:
         secho_err(

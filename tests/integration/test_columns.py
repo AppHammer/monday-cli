@@ -124,3 +124,105 @@ def test_create_status_column_with_labels_verified(
     label_map = {lbl["index"]: lbl["label"] for lbl in col["labels"]}
     assert label_map.get(1) == "Low", f"Expected index 1 → 'Low', got {label_map}"
     assert label_map.get(2) == "High", f"Expected index 2 → 'High', got {label_map}"
+
+
+# ---------------------------------------------------------------------------
+# columns delete — issue #88 / AC1 + AC2 + AC4
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.integration
+def test_create_then_delete_removes_column(
+    test_board_id: str,
+    created_column: Callable[..., str],
+) -> None:
+    """AC2: a column deleted with --force is no longer present in columns list.
+
+    Creates a throwaway text column, deletes it with --force, then polls
+    columns list to verify the column has actually been removed (not just
+    that the delete response said so).
+    """
+    column_id = created_column("del-test", "text")
+
+    # Verify it exists before deleting
+    before_data = run_cli("columns", "list", "--board-id", test_board_id)
+    assert isinstance(before_data, dict)
+    before_ids = [c.get("column_id") for c in before_data.get("columns", [])]
+    assert column_id in before_ids, (
+        f"Newly created column {column_id} not found before delete attempt. "
+        f"Present columns: {before_ids}"
+    )
+
+    # Delete with --force (no prompt)
+    delete_data = run_cli(
+        "columns",
+        "delete",
+        "--board-id",
+        test_board_id,
+        "--column-id",
+        column_id,
+        "--force",
+        is_mutation=True,
+    )
+    assert isinstance(delete_data, dict)
+    assert delete_data.get("deleted") is True
+    assert delete_data.get("column_id") == column_id
+
+    # Verify the column is gone from columns list (bounded poll for eventual consistency)
+    from tests.integration.helpers import run_cli_until
+
+    after_data = run_cli_until(
+        lambda d: isinstance(d, dict)
+        and column_id not in [c.get("column_id") for c in d.get("columns", [])],
+        "columns",
+        "list",
+        "--board-id",
+        test_board_id,
+    )
+    assert isinstance(after_data, dict)
+    after_ids = [c.get("column_id") for c in after_data.get("columns", [])]
+    assert column_id not in after_ids, (
+        f"Column {column_id} still appears in columns list after deletion. "
+        f"Present columns: {after_ids}"
+    )
+
+
+@pytest.mark.integration
+def test_delete_unknown_column_id_exits_1(
+    test_board_id: str,
+) -> None:
+    """AC4: deleting a non-existent column id exits 1 with a teaching error.
+
+    Verifies the CLI surfaces the "not found" teaching error (including the
+    tip to run columns list) without making a delete API call, and that the
+    board's column count is unchanged.
+    """
+    # Record board state before the attempted delete
+    before_data = run_cli("columns", "list", "--board-id", test_board_id)
+    assert isinstance(before_data, dict)
+    before_count = before_data.get("total_count", 0)
+
+    # Attempt to delete a column id that does not exist
+    result, stderr = run_cli(
+        "columns",
+        "delete",
+        "--board-id",
+        test_board_id,
+        "--column-id",
+        "this_column_id_does_not_exist_xyz",
+        "--force",
+        expect_error=True,
+        capture_stderr=True,
+    )
+
+    # Teaching error + tip must appear on stderr
+    assert "not found" in stderr.lower(), f"Expected 'not found' in stderr: {stderr!r}"
+    assert "columns list" in stderr, f"Expected tip in stderr: {stderr!r}"
+
+    # Board must be unchanged (column count is same)
+    after_data = run_cli("columns", "list", "--board-id", test_board_id)
+    assert isinstance(after_data, dict)
+    after_count = after_data.get("total_count", 0)
+    assert (
+        after_count == before_count
+    ), f"Column count changed after failed delete: was {before_count}, now {after_count}"
